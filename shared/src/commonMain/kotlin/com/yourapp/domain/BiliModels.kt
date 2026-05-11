@@ -31,3 +31,13 @@ data class FollowingItem(
     val face: String = "",
     val sign: String = ""
 )
+
+@Serializable
+data class BiliVideo(
+    val bvid: String = "",
+    val title: String = "",
+    val aid: Long = 0,
+    val pic: String = "",
+    val length: String = "",
+    val description: String = ""
+)

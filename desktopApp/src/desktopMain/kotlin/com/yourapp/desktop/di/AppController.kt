@@ -17,7 +17,7 @@ class AppController {
     private val getFollowers = GetFollowersUseCase(repo)
     private val saveCookies = SaveCookiesUseCase(repo)
     private val logoutUseCase = LogoutUseCase(repo)
-    private val isLoggedIn = IsLoggedInUseCase(repo)
+    private val checkLogin = IsLoggedInUseCase(repo)
 
     private val _user = MutableStateFlow<BiliUser?>(null)
     val user: StateFlow<BiliUser?> = _user.asStateFlow()
@@ -39,7 +39,7 @@ class AppController {
 
     init {
         scope.launch {
-            _isLoggedIn.value = isLoggedIn().first()
+            _isLoggedIn.value = checkLogin().first()
             if (_isLoggedIn.value) {
                 loadUserInfo()
             }

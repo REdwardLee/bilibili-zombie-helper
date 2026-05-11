@@ -1,6 +1,7 @@
 package com.yourapp.data
 
 import com.yourapp.domain.BiliUser
+import com.yourapp.domain.BiliVideo
 import kotlinx.coroutines.flow.Flow
 
 interface BiliRepository {
@@ -14,7 +15,7 @@ interface BiliRepository {
     suspend fun getFollowers(vmid: Long, page: Int = 1, pageSize: Int = 50): Result<List<BiliUser>>
     
     /** 获取用户的动态 / 视频列表（简化版） */
-    suspend fun getUserVideos(mid: Long, page: Int = 1): Result<List<Any>>
+    suspend fun getUserVideos(mid: Long, page: Int = 1): Result<List<BiliVideo>>
     
     /** 从 Cookie 字符串解析并保存 */
     suspend fun saveCookies(cookieString: String)

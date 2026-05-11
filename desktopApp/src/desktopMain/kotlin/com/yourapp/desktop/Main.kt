@@ -29,6 +29,7 @@ fun main() = application {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DesktopApp() {
     val controller = remember { AppController() }

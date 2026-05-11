@@ -1,6 +1,7 @@
 package com.yourapp.data
 
 import com.yourapp.domain.BiliUser
+import com.yourapp.domain.BiliVideo
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.plugins.*
@@ -103,7 +104,7 @@ class BiliRepositoryImpl(
         body.data?.list?.map { it.toBiliUser() } ?: emptyList()
     }
 
-    override suspend fun getUserVideos(mid: Long, page: Int): Result<List<Any>> = runCatching {
+    override suspend fun getUserVideos(mid: Long, page: Int): Result<List<BiliVideo>> = runCatching {
         val cookie = getCookieHeader()
         
         val response = client.get("https://api.bilibili.com/x/space/arc/search") {
@@ -224,5 +225,5 @@ class BiliRepositoryImpl(
     private data class SpaceVideoData(val list: VideoList? = null)
 
     @Serializable
-    private data class VideoList(val vlist: List<Any> = emptyList())
+    private data class VideoList(val vlist: List<BiliVideo> = emptyList())
 }

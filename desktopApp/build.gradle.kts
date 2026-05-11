@@ -10,6 +10,7 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(compose.material3)
                 implementation(project(":shared"))
             }
         }

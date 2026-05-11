@@ -1,64 +1,134 @@
-// Android DI / ViewModel — 唯一接触平台特定实现的地方
 package com.yourapp.android.di
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.yourapp.data.TaskRepository
-import com.yourapp.domain.Task
+import com.yourapp.data.AndroidSettingsStorage
+import com.yourapp.data.BiliRepositoryImpl
+import com.yourapp.domain.BiliUser
 import com.yourapp.usecases.*
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-class AppViewModel : ViewModel() {
+class AppViewModel(context: Context) : ViewModel() {
+    private val storage = AndroidSettingsStorage(context.applicationContext)
+    private val repo = BiliRepositoryImpl(storage)
 
-    // TODO: 换成真实 Repository（Room / DataStore / 网络）
-    private val repository: TaskRepository = InMemoryTaskRepository()
+    private val getLoginInfo = GetLoginInfoUseCase(repo)
+    private val getFollowings = GetFollowingsUseCase(repo)
+    private val getFollowers = GetFollowersUseCase(repo)
+    private val saveCookies = SaveCookiesUseCase(repo)
+    private val logoutUseCase = LogoutUseCase(repo)
+    private val isLoggedIn = IsLoggedInUseCase(repo)
 
-    private val getTasks = GetTasksUseCase(repository)
-    private val addTask = AddTaskUseCase(repository)
-    private val toggleTask = ToggleTaskUseCase(repository)
-    private val deleteTask = DeleteTaskUseCase(repository)
+    // UI State
+    private val _user = MutableStateFlow<BiliUser?>(null)
+    val user: StateFlow<BiliUser?> = _user.asStateFlow()
 
-    val tasks: StateFlow<List<Task>> = getTasks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _followings = MutableStateFlow<List<BiliUser>>(emptyList())
+    val followings: StateFlow<List<BiliUser>> = _followings.asStateFlow()
 
-    fun addTask(title: String) {
-        viewModelScope.launch { addTask(title) }
+    private val _followers = MutableStateFlow<List<BiliUser>>(emptyList())
+    val followers: StateFlow<List<BiliUser>> = _followers.asStateFlow()
+
+    private val _isLoggedIn = MutableStateFlow(false)
+    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    init {
+        checkLoginStatus()
     }
 
-    fun toggleTask(id: String) {
-        viewModelScope.launch { toggleTask(id) }
+    private fun checkLoginStatus() {
+        viewModelScope.launch {
+            _isLoggedIn.value = isLoggedIn().first()
+            if (_isLoggedIn.value) {
+                loadUserInfo()
+            }
+        }
     }
 
-    fun deleteTask(id: String) {
-        viewModelScope.launch { deleteTask(id) }
+    fun saveCookieAndLogin(cookieString: String) {
+        viewModelScope.launch {
+            _loading.value = true
+            _error.value = null
+            try {
+                saveCookies(cookieString)
+                _isLoggedIn.value = true
+                loadUserInfo()
+            } catch (e: Exception) {
+                _error.value = "登录失败: ${e.message}"
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    fun loadUserInfo() {
+        viewModelScope.launch {
+            _loading.value = true
+            _error.value = null
+            getLoginInfo().fold(
+                onSuccess = { _user.value = it },
+                onFailure = { _error.value = "获取用户信息失败: ${it.message}" }
+            )
+            _loading.value = false
+        }
+    }
+
+    fun loadFollowings() {
+        viewModelScope.launch {
+            val uid = _user.value?.mid ?: return@launch
+            _loading.value = true
+            _error.value = null
+            getFollowings(uid).fold(
+                onSuccess = { _followings.value = it },
+                onFailure = { _error.value = "获取关注列表失败: ${it.message}" }
+            )
+            _loading.value = false
+        }
+    }
+
+    fun loadFollowers() {
+        viewModelScope.launch {
+            val uid = _user.value?.mid ?: return@launch
+            _loading.value = true
+            _error.value = null
+            getFollowers(uid).fold(
+                onSuccess = { _followers.value = it },
+                onFailure = { _error.value = "获取粉丝列表失败: ${it.message}" }
+            )
+            _loading.value = false
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            logoutUseCase()
+            _user.value = null
+            _followings.value = emptyList()
+            _followers.value = emptyList()
+            _isLoggedIn.value = false
+        }
+    }
+
+    fun clearError() {
+        _error.value = null
     }
 }
 
-// 临时内存实现，后续替换为真实存储
-class InMemoryTaskRepository : TaskRepository {
-    private val _tasks = mutableListOf<Task>()
-    private var _flow: kotlinx.coroutines.flow.MutableStateFlow<List<Task>> = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
-
-    override fun getAllTasks() = _flow
-    override suspend fun getTaskById(id: String) = _tasks.find { it.id == id }
-    override suspend fun addTask(task: Task) {
-        _tasks.add(task)
-        _flow.value = _tasks.toList()
-    }
-    override suspend fun updateTask(task: Task) {
-        val idx = _tasks.indexOfFirst { it.id == task.id }
-        if (idx != -1) _tasks[idx] = task
-        _flow.value = _tasks.toList()
-    }
-    override suspend fun deleteTask(id: String) {
-        _tasks.removeAll { it.id == id }
-        _flow.value = _tasks.toList()
-    }
-    override suspend fun toggleTaskComplete(id: String) {
-        val task = _tasks.find { it.id == id } ?: return
-        updateTask(task.copy(isCompleted = !task.isCompleted))
+class AppViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(AppViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return AppViewModel(context) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

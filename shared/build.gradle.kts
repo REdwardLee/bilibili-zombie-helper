@@ -1,5 +1,6 @@
 plugins {
     kotlin("multiplatform")
+    kotlin("plugin.serialization")
     id("com.android.library")
 }
 
@@ -26,8 +27,12 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                // Kotlin Coroutines（异步、Flow）
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+                implementation("io.ktor:ktor-client-core:2.3.7")
+                implementation("io.ktor:ktor-client-content-negotiation:2.3.7")
+                implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.7")
+                implementation("io.ktor:ktor-client-logging:2.3.7")
             }
         }
 
@@ -39,14 +44,14 @@ kotlin {
 
         val androidMain by getting {
             dependencies {
-                // Android 特定依赖
+                implementation("io.ktor:ktor-client-okhttp:2.3.7")
             }
         }
 
         val desktopMain by getting {
             dependsOn(commonMain)
             dependencies {
-                // Desktop 特定依赖
+                implementation("io.ktor:ktor-client-java:2.3.7")
             }
         }
 

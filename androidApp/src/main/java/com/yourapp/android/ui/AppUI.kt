@@ -18,12 +18,17 @@ import com.yourapp.android.di.AppViewModel
 import com.yourapp.android.di.AppViewModelFactory
 import com.yourapp.domain.BiliUser
 
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppUI(factory: AppViewModelFactory) {
     val vm: AppViewModel = viewModel(factory = factory)
     val isLoggedIn by vm.isLoggedIn.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     // 错误提示
     val snackbarHostState = remember { SnackbarHostState() }
@@ -55,7 +60,12 @@ fun AppUI(factory: AppViewModelFactory) {
             }
 
             if (!isLoggedIn) {
-                LoginScreen(vm)
+                LoginScreen(
+                    vm = vm,
+                    onWebViewLogin = {
+                        context.startActivity(Intent(context, WebViewLoginActivity::class.java))
+                    }
+                )
             } else {
                 MainScreen(vm)
             }
@@ -64,8 +74,9 @@ fun AppUI(factory: AppViewModelFactory) {
 }
 
 @Composable
-fun LoginScreen(vm: AppViewModel) {
+fun LoginScreen(vm: AppViewModel, onWebViewLogin: () -> Unit) {
     var cookieInput by remember { mutableStateOf("") }
+    var showManualInput by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -76,35 +87,45 @@ fun LoginScreen(vm: AppViewModel) {
     ) {
         Text("B站助手", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(8.dp))
-        Text("粘贴浏览器 Cookie 即可登录", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(24.dp))
+        Text("登录你的B站账号", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(32.dp))
 
-        OutlinedTextField(
-            value = cookieInput,
-            onValueChange = { cookieInput = it },
-            label = { Text("Cookie 字符串") },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 4,
-            maxLines = 6
-        )
-
-        Spacer(Modifier.height(16.dp))
-
+        // 主要登录方式：WebView
         Button(
-            onClick = { vm.saveCookieAndLogin(cookieInput) },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = cookieInput.isNotBlank()
+            onClick = onWebViewLogin,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text("登录")
+            Text("浏览器登录（推荐）")
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
-        Text(
-            "获取方式：浏览器打开 bilibili.com → F12 → Application/Storage → Cookies → 复制 SESSDATA 等完整 cookie 字符串",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        // 备选方式：手动输入
+        TextButton(
+            onClick = { showManualInput = !showManualInput }
+        ) {
+            Text(if (showManualInput) "收起手动输入" else "手动输入Cookie")
+        }
+
+        if (showManualInput) {
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = cookieInput,
+                onValueChange = { cookieInput = it },
+                label = { Text("Cookie 字符串") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 4,
+                maxLines = 6
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { vm.saveCookieAndLogin(cookieInput) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = cookieInput.isNotBlank()
+            ) {
+                Text("登录")
+            }
+        }
     }
 }
 

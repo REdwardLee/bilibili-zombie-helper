@@ -20,7 +20,7 @@ class AppViewModel(context: Context) : ViewModel() {
     private val getFollowers = GetFollowersUseCase(repo)
     private val saveCookies = SaveCookiesUseCase(repo)
     private val logoutUseCase = LogoutUseCase(repo)
-    private val isLoggedIn = IsLoggedInUseCase(repo)
+    private val checkLogin = IsLoggedInUseCase(repo)
 
     // UI State
     private val _user = MutableStateFlow<BiliUser?>(null)
@@ -47,7 +47,7 @@ class AppViewModel(context: Context) : ViewModel() {
 
     private fun checkLoginStatus() {
         viewModelScope.launch {
-            _isLoggedIn.value = isLoggedIn().first()
+            _isLoggedIn.value = checkLogin().first()
             if (_isLoggedIn.value) {
                 loadUserInfo()
             }

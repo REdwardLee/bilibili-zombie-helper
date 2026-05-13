@@ -23,13 +23,12 @@ class BiliRepositoryImpl(
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
+        namingStrategy = kotlinx.serialization.json.JsonNamingStrategy.SnakeCase
     }
 
     private val client = HttpClient {
         install(ContentNegotiation) { json(json) }
-        install(HttpCookies) {
-            // 从 storage 读取 cookie 手动设置到请求里
-        }
+        // 不启用 HttpCookies 插件，完全手动管理 cookie
         defaultRequest {
             header(HttpHeaders.UserAgent, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             header(HttpHeaders.Referrer, "https://space.bilibili.com")
@@ -38,6 +37,12 @@ class BiliRepositoryImpl(
     }
 
     private suspend fun getCookieHeader(): String {
+        // 优先使用完整的原始 cookie 字符串
+        val fullCookie = storage.getString(StorageKeys.BILI_FULL_COOKIE)
+        if (fullCookie.isNotEmpty()) {
+            return fullCookie
+        }
+        // 降级：用拼接的三个字段
         val sessdata = storage.getString(StorageKeys.BILI_SESSDATA)
         val biliJct = storage.getString(StorageKeys.BILI_BILI_JCT)
         val dede = storage.getString(StorageKeys.BILI_DEDEUSERID)
@@ -104,26 +109,140 @@ class BiliRepositoryImpl(
         body.data?.list?.map { it.toBiliUser() } ?: emptyList()
     }
 
-    override suspend fun getUserVideos(mid: Long, page: Int): Result<List<BiliVideo>> = runCatching {
+    override suspend fun getFollowingsTotal(vmid: Long): Result<Int> = runCatching {
         val cookie = getCookieHeader()
-        
-        val response = client.get("https://api.bilibili.com/x/space/arc/search") {
-            parameter("mid", mid)
-            parameter("pn", page)
-            parameter("ps", 30)
+        val response = client.get("https://api.bilibili.com/x/relation/stat") {
+            parameter("vmid", vmid)
+            header(HttpHeaders.Cookie, cookie)
+        }
+        val body: BiliResponse<RelationStatData> = response.body()
+        require(body.code == 0) { "获取关注总数失败: ${body.message}" }
+        body.data?.following ?: 0
+    }
+
+    override suspend fun getFollowersTotal(vmid: Long): Result<Int> = runCatching {
+        val cookie = getCookieHeader()
+        val response = client.get("https://api.bilibili.com/x/relation/stat") {
+            parameter("vmid", vmid)
+            header(HttpHeaders.Cookie, cookie)
+        }
+        val body: BiliResponse<RelationStatData> = response.body()
+        require(body.code == 0) { "获取粉丝总数失败: ${body.message}" }
+        body.data?.follower ?: 0
+    }
+
+    override suspend fun getUserLastUpdateTime(mid: Long): Result<Long> = runCatching {
+        val cookie = getCookieHeader()
+
+        // 获取最新 2 条动态，取最近时间
+        val dynamicResponse = client.get("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space") {
+            parameter("host_mid", mid)
+            parameter("offset", "")
+            parameter("page", 1)
+            parameter("ps", 2)
+            parameter("timezone_offset", -480)
+            parameter("platform", "web")
             header(HttpHeaders.Cookie, cookie)
         }
 
-        val body: BiliResponse<SpaceVideoData> = response.body()
-        require(body.code == 0) { "获取视频列表失败: ${body.message}" }
-        
-        body.data?.list?.vlist ?: emptyList()
+        val dynamicBody: BiliResponse<DynamicData> = dynamicResponse.body()
+
+        // 区分被封禁和其他API错误
+        if (dynamicBody.code != 0) {
+            val msg = dynamicBody.message.lowercase()
+            // 被封禁/账号异常的特征：-404 或关键词
+            if (dynamicBody.code == -404 || dynamicBody.code == -403 ||
+                msg.contains("封禁") || msg.contains("冻结") || msg.contains("小黑屋") ||
+                msg.contains("账号") || msg.contains("不存在") || msg.contains("木有")
+            ) {
+                return@runCatching -1L  // -1 = 被封禁
+            }
+            throw Exception("获取动态失败: ${dynamicBody.message}")
+        }
+
+        val items = dynamicBody.data?.items ?: emptyList()
+        if (items.isEmpty()) {
+            // 动态为空时，查空间信息确认是否被封禁（被封禁账号动态API返回空列表）
+            val spaceResponse = client.get("https://api.bilibili.com/x/space/acc/info") {
+                parameter("mid", mid)
+                header(HttpHeaders.Cookie, cookie)
+            }
+            val spaceBody: BiliResponse<SpaceInfoData> = spaceResponse.body()
+            if (spaceBody.code == 0 && spaceBody.data?.silence == 1) {
+                return@runCatching -1L  // 被封禁
+            }
+            return@runCatching -2L  // 无动态（从未发过或已清空）
+        }
+
+        // 取最新 2 条中的最大 pub_ts（秒级时间戳）
+        val timestamps = items.mapNotNull { item ->
+            val pubTs = item.modules?.moduleAuthor?.pubTs
+            // pub_ts 是秒级时间戳，转毫秒
+            if (pubTs != null && pubTs > 0) pubTs * 1000L else null
+        }
+
+        timestamps.maxOrNull() ?: 0L
+    }
+
+    override suspend fun getRelationStatus(mid: Long): Result<Int> = runCatching {
+        val cookie = getCookieHeader()
+        val response = client.get("https://api.bilibili.com/x/relation?fid=$mid") {
+            header(HttpHeaders.Cookie, cookie)
+            header(HttpHeaders.Referrer, "https://space.bilibili.com")
+            header(HttpHeaders.UserAgent, "Mozilla/5.0 (Linux; Android 10; SM-G960U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            header("X-Requested-With", "XMLHttpRequest")
+        }
+
+        val bodyText = response.bodyAsText()
+        // 被风控时返回 HTML（以 < 开头），不是 JSON
+        if (bodyText.trimStart().startsWith("<")) {
+            // 把完整 HTML 放在异常里，带特殊标记方便上层解析保存
+            throw Exception("HTML_BLOCK\n$bodyText")
+        }
+
+        // 安全解析 JSON
+        val relationResp = try {
+            json.decodeFromString(RelationResponse.serializer(), bodyText)
+        } catch (e: Exception) {
+            val preview = bodyText.take(200).replace("\n", " ")
+            throw Exception("JSON解析失败: ${e.message?.take(60)}... 原始内容: $preview")
+        }
+
+        require(relationResp.code == 0) { "查询关系失败 (code=${relationResp.code})" }
+        relationResp.data?.attribute ?: 0
+    }
+
+    override suspend fun modifyRelation(fid: Long, act: Int): Result<Unit> = runCatching {
+        val cookie = getCookieHeader()
+        val biliJct = storage.getString(StorageKeys.BILI_BILI_JCT)
+        require(biliJct.isNotEmpty()) { "缺少 CSRF token" }
+
+        val myMid = storage.getString(StorageKeys.BILI_UID)
+        val referer = if (myMid.isNotEmpty()) "https://space.bilibili.com/$myMid" else "https://space.bilibili.com"
+
+        val response = client.post("https://api.bilibili.com/x/relation/modify") {
+            contentType(ContentType.Application.FormUrlEncoded)
+            header(HttpHeaders.Cookie, cookie)
+            header(HttpHeaders.Referrer, referer)
+            header(HttpHeaders.Origin, "https://space.bilibili.com")
+            setBody("fid=$fid&act=$act&re_src=11&csrf=$biliJct")
+        }
+
+        val bodyText = response.bodyAsText()
+        // 手动解析JSON
+        val code = bodyText.substringAfter("\"code\":").substringBefore(",").trim().toIntOrNull() ?: -999
+        val message = bodyText.substringAfter("\"message\":\"").substringBefore("\",") ?: "未知错误"
+
+        require(code == 0) { "操作失败: $message (code=$code)" }
     }
 
     override suspend fun saveCookies(cookieString: String) {
-        // 解析 cookie 字符串，提取关键字段
+        // 保存完整的原始 cookie 字符串（用于 API 请求时原样发送）
+        storage.putString(StorageKeys.BILI_FULL_COOKIE, cookieString)
+
+        // 同时解析关键字段用于 UID 等用途
         val cookies = cookieString.split(";").map { it.trim() }
-        
+
         cookies.forEach { cookie ->
             when {
                 cookie.startsWith("SESSDATA=") -> {
@@ -142,8 +261,8 @@ class BiliRepositoryImpl(
     }
 
     override fun isLoggedIn(): Flow<Boolean> = flow {
-        val sessdata = storage.getString(StorageKeys.BILI_SESSDATA)
-        emit(sessdata.isNotEmpty())
+        val fullCookie = storage.getString(StorageKeys.BILI_FULL_COOKIE)
+        emit(fullCookie.isNotEmpty())
     }
 
     override suspend fun logout() {
@@ -214,7 +333,8 @@ class BiliRepositoryImpl(
             uname = uname,
             face = face,
             sign = sign,
-            vip = com.yourapp.domain.VipInfo(vip.vipType, vip.vipStatus)
+            vip = com.yourapp.domain.VipInfo(vip.vipType, vip.vipStatus),
+            attribute = attribute
         )
     }
 
@@ -225,5 +345,68 @@ class BiliRepositoryImpl(
     private data class SpaceVideoData(val list: VideoList? = null)
 
     @Serializable
-    private data class VideoList(val vlist: List<BiliVideo> = emptyList())
+    private data class VideoList(val vlist: List<BiliVideoItem> = emptyList())
+
+    @Serializable
+    private data class BiliVideoItem(
+        val bvid: String = "",
+        val title: String = "",
+        val created: Long = 0,
+        val pubdate: Long = 0
+    )
+
+    @Serializable
+    private data class DynamicData(
+        val items: List<DynamicItem> = emptyList()
+    )
+
+    @Serializable
+    private data class DynamicItem(
+        val modules: DynamicModules? = null
+    )
+
+    @Serializable
+    private data class DynamicModules(
+        val moduleTag: DynamicTag? = null,
+        val moduleAuthor: DynamicAuthor? = null
+    )
+
+    @Serializable
+    private data class DynamicTag(
+        val text: String = ""
+    )
+
+    @Serializable
+    private data class DynamicAuthor(
+        @kotlinx.serialization.SerialName("pub_ts")
+        val pubTs: Long = 0
+    )
+
+    @Serializable
+    private data class RelationStatData(
+        val following: Int = 0,
+        val whisper: Int = 0,
+        val black: Int = 0,
+        val follower: Int = 0
+    )
+
+    @Serializable
+    private data class SpaceInfoData(
+        val mid: Long = 0,
+        val name: String = "",
+        val silence: Int = 0  // 0=正常, 1=被封禁
+    )
+
+    @Serializable
+    private data class RelationResponse(
+        val code: Int,
+        val data: RelationData? = null
+    )
+
+    @Serializable
+    private data class RelationData(
+        val mid: Long = 0,
+        val attribute: Int = 0,
+        val mtime: Long = 0
+    )
 }

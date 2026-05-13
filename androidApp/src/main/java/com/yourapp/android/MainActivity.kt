@@ -9,9 +9,12 @@ import com.yourapp.android.di.AppViewModelFactory
 import com.yourapp.android.ui.AppUI
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         val factory = AppViewModelFactory(applicationContext)
+
         setContent {
             MaterialTheme {
                 AppUI(factory = factory)

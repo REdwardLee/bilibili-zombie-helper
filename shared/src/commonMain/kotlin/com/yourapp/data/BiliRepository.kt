@@ -14,8 +14,20 @@ interface BiliRepository {
     /** 获取粉丝列表 */
     suspend fun getFollowers(vmid: Long, page: Int = 1, pageSize: Int = 50): Result<List<BiliUser>>
     
-    /** 获取用户的动态 / 视频列表（简化版） */
-    suspend fun getUserVideos(mid: Long, page: Int = 1): Result<List<BiliVideo>>
+    /** 获取关注列表总数 */
+    suspend fun getFollowingsTotal(vmid: Long): Result<Int>
+
+    /** 获取粉丝列表总数 */
+    suspend fun getFollowersTotal(vmid: Long): Result<Int>
+    
+    /** 获取用户最后更新时间（视频/动态，毫秒时间戳，0表示无法获取，-1被封禁，-2无动态） */
+    suspend fun getUserLastUpdateTime(mid: Long): Result<Long>
+
+    /** 查询与指定用户的关注关系，返回 attribute (0=未关注, 2=已关注, 6=互关) */
+    suspend fun getRelationStatus(mid: Long): Result<Int>
+
+    /** 修改关注关系 (act: 1=关注, 2=取关) */
+    suspend fun modifyRelation(fid: Long, act: Int): Result<Unit>
     
     /** 从 Cookie 字符串解析并保存 */
     suspend fun saveCookies(cookieString: String)

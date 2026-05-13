@@ -12,7 +12,8 @@ data class BiliUser(
     @SerialName("follower") val followerCount: Int = 0,
     @SerialName("following") val followingCount: Int = 0,
     val level: Int = 0,
-    val vip: VipInfo = VipInfo()
+    val vip: VipInfo = VipInfo(),
+    val attribute: Int = 0        // 0=未关注, 2=已关注, 6=互关
 )
 
 @Serializable

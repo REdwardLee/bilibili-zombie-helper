@@ -38,6 +38,11 @@ class GetRelationStatusUseCase(private val repo: BiliRepository) {
     suspend operator fun invoke(mid: Long): Result<Int> = repo.getRelationStatus(mid)
 }
 
+class SetSpecialFollowUseCase(private val repo: BiliRepository) {
+    suspend operator fun invoke(fid: Long, isSpecial: Boolean): Result<Unit> =
+        repo.setSpecialFollow(fid, isSpecial)
+}
+
 class IsLoggedInUseCase(private val repo: BiliRepository) {
     operator fun invoke(): Flow<Boolean> = repo.isLoggedIn()
 }

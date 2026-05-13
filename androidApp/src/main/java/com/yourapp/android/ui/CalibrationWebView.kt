@@ -25,13 +25,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun CalibrationWebView(
     mid: Long,
     cookieString: String,
-    onResult: (mid: Long, isFollowing: Boolean) -> Unit,
+    onResult: (mid: Long, isFollowing: Boolean, isTimeout: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // key = mid 确保 mid 变化时销毁旧 WebView
     key(mid) {
-        val bridge = WebViewJsBridge { resultMid, isFollowing ->
-            onResult(resultMid, isFollowing)
+        val bridge = WebViewJsBridge { resultMid, isFollowing, isTimeout ->
+            onResult(resultMid, isFollowing, isTimeout)
         }
 
         AndroidView(
@@ -55,58 +55,108 @@ fun CalibrationWebView(
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            // 等 800ms 让 SPA 渲染完再检测
+                            // 等 1.5 秒让 SPA 完全渲染，再检测关注按钮
                             val js = """
                                 setTimeout(function() {
                                     (function() {
                                         if (window.__calibrationReported) return;
-                                        window.__calibrationReported = true;
 
                                         function detect() {
-                                            // 1. 先查常见 class
+                                            // 1. 常见关注按钮选择器（B站SPA动态渲染）
                                             var selectors = [
                                                 '.follow-btn', '.follow-btn-wrap',
                                                 '[class*="follow-btn"]', '[class*="FollowBtn"]',
-                                                '[data-module="follow"]'
+                                                '[class*="follow_btn"]', '[class*="followBtn"]',
+                                                '[data-module="follow"]', '[data-type="follow"]',
+                                                '.action-follow', '.user-follow',
+                                                'button:has-text(已关注)', 'button:has-text(关注)',
+                                                'a:has-text(已关注)', 'a:has-text(关注)'
                                             ];
                                             for (var s = 0; s < selectors.length; s++) {
-                                                var el = document.querySelector(selectors[s]);
-                                                if (el) {
-                                                    var text = (el.textContent || el.innerText || '').trim();
-                                                    if (text.indexOf('已关注') !== -1 || text.indexOf('相互关注') !== -1 || text.indexOf('回关') !== -1) return {found: true, following: true};
-                                                    if (text.indexOf('关注') !== -1 || text.indexOf('+') !== -1) return {found: true, following: false};
-                                                }
+                                                try {
+                                                    var els = document.querySelectorAll(selectors[s]);
+                                                    for (var e = 0; e < els.length; e++) {
+                                                        var el = els[e];
+                                                        var text = (el.textContent || el.innerText || '').trim();
+                                                        // 已关注状态：已关注 / 相互关注 / 回关 / 特别关注 / 特关
+                                                        if (text.indexOf('已关注') !== -1 || text.indexOf('相互关注') !== -1 || text.indexOf('回关') !== -1 || text.indexOf('特别关注') !== -1 || text.indexOf('特关') !== -1)
+                                                            return {found: true, following: true};
+                                                        // 未关注状态：只匹配纯"关注"按钮（排除"特别关注"干扰）
+                                                        if (text === '关注' || text === '+ 关注' || text === '+关注' || text === '＋关注' || text === '加关注')
+                                                            return {found: true, following: false};
+                                                    }
+                                                } catch(_) {}
                                             }
 
-                                            // 2. fallback：遍历按钮和链接
-                                            var all = document.querySelectorAll('button, a, span, div');
+                                            // 2. 遍历所有可见按钮和链接
+                                            var all = document.querySelectorAll('button, a, span, div, p');
                                             for (var i = 0; i < all.length; i++) {
                                                 var t = (all[i].textContent || all[i].innerText || '').trim();
-                                                if (t === '已关注' || t === '已关注Ta' || t === '相互关注' || t === '回关')
+                                                // 已关注
+                                                if (t === '已关注' || t === '已关注Ta' || t === '相互关注' || t === '回关' || t === '特别关注' || t === '特关')
                                                     return {found: true, following: true};
-                                                if (t === '关注' || t === '+ 关注' || t === '+关注')
+                                                // 未关注
+                                                if (t === '关注' || t === '+ 关注' || t === '+关注' || t === '＋关注' || t === '加关注')
                                                     return {found: true, following: false};
                                             }
+
+                                            // 3. 检查是否有特殊标记（有些版本用 data-follow 属性）
+                                            var followEls = document.querySelectorAll('[data-follow]');
+                                            for (var j = 0; j < followEls.length; j++) {
+                                                var attr = followEls[j].getAttribute('data-follow');
+                                                if (attr === '1' || attr === 'true') return {found: true, following: true};
+                                                if (attr === '0' || attr === 'false') return {found: true, following: false};
+                                            }
+
+                                            // 4. 检查按钮上是否有"已关注"相关的 class（特别关注可能用不同 class）
+                                            var allBtns = document.querySelectorAll('button, a');
+                                            for (var b = 0; b < allBtns.length; b++) {
+                                                var cls = allBtns[b].className || '';
+                                                if (cls.indexOf('followed') !== -1 || cls.indexOf('following') !== -1 || cls.indexOf('attention') !== -1)
+                                                    return {found: true, following: true};
+                                                if (cls.indexOf('follow') !== -1 && cls.indexOf('unfollow') === -1 && cls.indexOf('nofollow') === -1)
+                                                    return {found: true, following: false};
+                                            }
+
                                             return {found: false, following: false};
                                         }
 
                                         var result = detect();
                                         if (result.found) {
+                                            window.__calibrationReported = true;
                                             window.AndroidBridge.reportStatus($mid, result.following);
                                         } else {
-                                            // 按钮没找到，可能是页面结构不同，fallback 未关注
-                                            window.AndroidBridge.reportStatus($mid, false);
+                                            // 按钮没找到，再延迟 1 秒重试一次（SPA 可能还没渲染完）
+                                            setTimeout(function() {
+                                                if (window.__calibrationReported) return;
+                                                var retry = detect();
+                                                window.__calibrationReported = true;
+                                                if (retry.found) {
+                                                    window.AndroidBridge.reportStatus($mid, retry.following);
+                                                } else {
+                                                    // 还是没找到，fallback：尝试从页面 JSON 数据推断
+                                                    var pageData = window.__INITIAL_STATE__ || window.__SPACE_DATA__ || {};
+                                                    var relation = pageData.relation || {};
+                                                    var following = relation.following || relation.attention || 0;
+                                                    if (following) {
+                                                        window.AndroidBridge.reportStatus($mid, true);
+                                                    } else {
+                                                        // 最终 fallback：保守策略，保持原状态（不改动）
+                                                        window.AndroidBridge.reportStatus($mid, false);
+                                                    }
+                                                }
+                                            }, 1000);
                                         }
                                     })();
-                                }, 800);
+                                }, 1500);
 
-                                // 绝对超时：6 秒后不管有没有结果都回调
+                                // 绝对超时：8 秒后不管有没有结果都回调（保守策略：不修改状态）
                                 setTimeout(function() {
                                     if (!window.__calibrationReported) {
                                         window.__calibrationReported = true;
-                                        window.AndroidBridge.reportStatus($mid, false);
+                                        window.AndroidBridge.reportTimeout($mid);
                                     }
-                                }, 6000);
+                                }, 8000);
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
                         }

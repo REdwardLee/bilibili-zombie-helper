@@ -13,8 +13,26 @@ data class BiliUser(
     @SerialName("following") val followingCount: Int = 0,
     val level: Int = 0,
     val vip: VipInfo = VipInfo(),
-    val attribute: Int = 0        // 0=未关注, 2=已关注, 6=互关
+    val attribute: Int = 0,        // 0=未关注, 2=已关注, 6=互关
+    val special: Int = 0           // 0=普通关注, 1=特别关注（attribute>=2时有效）
 )
+
+/** 关注状态枚举 */
+enum class FollowStatus(val label: String) {
+    NONE("+关注"),
+    NORMAL("已关注"),
+    SPECIAL("特别关注");
+
+    companion object {
+        fun fromAttribute(attribute: Int, special: Int): FollowStatus {
+            return when {
+                attribute < 2 -> NONE
+                special == 1 -> SPECIAL
+                else -> NORMAL
+            }
+        }
+    }
+}
 
 @Serializable
 data class VipInfo(
@@ -27,6 +45,7 @@ data class VipInfo(
 data class FollowingItem(
     val mid: Long,
     val attribute: Int = 0,     // 0=未关注, 2=已关注, 6=互关
+    val special: Int = 0,       // 0=普通关注, 1=特别关注
     val mtime: Long = 0,        // 关注时间
     val uname: String = "",
     val face: String = "",

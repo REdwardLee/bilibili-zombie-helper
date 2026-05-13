@@ -265,6 +265,31 @@ class BiliRepositoryImpl(
         emit(fullCookie.isNotEmpty())
     }
 
+    override suspend fun setSpecialFollow(fid: Long, isSpecial: Boolean): Result<Unit> = runCatching {
+        val cookie = getCookieHeader()
+        val biliJct = storage.getString(StorageKeys.BILI_BILI_JCT)
+        require(biliJct.isNotEmpty()) { "缺少 CSRF token" }
+
+        val myMid = storage.getString(StorageKeys.BILI_UID)
+        val referer = if (myMid.isNotEmpty()) "https://space.bilibili.com/$myMid" else "https://space.bilibili.com"
+
+        val tagid = if (isSpecial) "-10" else "0"
+
+        val response = client.post("https://api.bilibili.com/x/relation/tags/addUsers") {
+            contentType(ContentType.Application.FormUrlEncoded)
+            header(HttpHeaders.Cookie, cookie)
+            header(HttpHeaders.Referrer, referer)
+            header(HttpHeaders.Origin, "https://space.bilibili.com")
+            setBody("fids=$fid&tagids=$tagid&csrf=$biliJct")
+        }
+
+        val bodyText = response.bodyAsText()
+        val code = bodyText.substringAfter("\"code\":").substringBefore(",").trim().toIntOrNull() ?: -999
+        val message = bodyText.substringAfter("\"message\":\"").substringBefore("\",") ?: "未知错误"
+
+        require(code == 0) { "操作失败: $message (code=$code)" }
+    }
+
     override suspend fun logout() {
         storage.clear()
     }
@@ -322,6 +347,7 @@ class BiliRepositoryImpl(
     private data class FollowingItemDto(
         val mid: Long = 0,
         val attribute: Int = 0,
+        val special: Int = 0,
         val mtime: Long = 0,
         val uname: String = "",
         val face: String = "",
@@ -334,7 +360,8 @@ class BiliRepositoryImpl(
             face = face,
             sign = sign,
             vip = com.yourapp.domain.VipInfo(vip.vipType, vip.vipStatus),
-            attribute = attribute
+            attribute = attribute,
+            special = special
         )
     }
 

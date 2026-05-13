@@ -42,6 +42,7 @@ class AppViewModel(context: Context) : ViewModel() {
     private val getUserLastUpdateTime = GetUserLastUpdateTimeUseCase(repo)
     private val getRelationStatus = GetRelationStatusUseCase(repo)
     private val modifyRelation = ModifyRelationUseCase(repo)
+    private val setSpecialFollow = SetSpecialFollowUseCase(repo)
     private val saveCookies = SaveCookiesUseCase(repo)
     private val logoutUseCase = LogoutUseCase(repo)
     private val checkLogin = IsLoggedInUseCase(repo)
@@ -103,6 +104,13 @@ class AppViewModel(context: Context) : ViewModel() {
 
     private val _recheckProgress = MutableStateFlow("")
     val recheckProgress: StateFlow<String> = _recheckProgress.asStateFlow()
+
+    // Snackbar 事件（支持 action 按钮）
+    data class SnackbarEvent(val message: String, val actionLabel: String? = null, val userMid: Long? = null)
+    private val _snackbarEvent = MutableStateFlow<SnackbarEvent?>(null)
+    val snackbarEvent: StateFlow<SnackbarEvent?> = _snackbarEvent.asStateFlow()
+
+    fun clearSnackbarEvent() { _snackbarEvent.value = null }
 
     // 调试日志（DEBUG 版本才有效）
     private val _debugLogs = MutableStateFlow<List<String>>(emptyList())
@@ -638,53 +646,105 @@ class AppViewModel(context: Context) : ViewModel() {
         }
     }
 
-    /** 通过批量获取关注列表来校准僵尸榜（绕过 getRelationStatus 风控） */
+    // 全校准暂停状态
+    private val _isBatchCalibrating = MutableStateFlow(false)
+    val isBatchCalibrating: StateFlow<Boolean> = _isBatchCalibrating.asStateFlow()
+
+    private val _isBatchCalibrationPaused = MutableStateFlow(false)
+    val isBatchCalibrationPaused: StateFlow<Boolean> = _isBatchCalibrationPaused.asStateFlow()
+
+    private var batchCalibrationJob: kotlinx.coroutines.Job? = null
+
+    fun pauseBatchCalibration() {
+        _isBatchCalibrationPaused.value = true
+        addDebugLog("⏸️ 全校准已暂停")
+    }
+
+    fun resumeBatchCalibration() {
+        _isBatchCalibrationPaused.value = false
+        addDebugLog("▶️ 全校准继续")
+    }
+
+    fun stopBatchCalibration() {
+        batchCalibrationJob?.cancel()
+        batchCalibrationJob = null
+        _isBatchCalibrating.value = false
+        _isBatchCalibrationPaused.value = false
+        addDebugLog("⏹️ 全校准已停止")
+    }
+
+    /** 通过批量获取关注列表来校准僵尸榜（绕过 getRelationStatus 风控）
+     * 支持暂停/继续/停止 */
     fun batchCalibrateByFollowingList(onComplete: () -> Unit = {}) {
-        viewModelScope.launch {
-            val uid = _user.value?.mid ?: return@launch
-            addDebugLog("开始通过关注列表批量校准...")
+        batchCalibrationJob?.cancel()
+        _isBatchCalibrating.value = true
+        _isBatchCalibrationPaused.value = false
 
-            // 分页获取所有关注
-            val allFollowings = mutableSetOf<Long>()
-            var page = 1
-            while (true) {
-                val result = getFollowings(uid, page, 50)
-                val list = result.getOrNull()
-                if (list == null) {
-                    addDebugLog("获取关注列表第$page 页失败")
-                    break
+        batchCalibrationJob = viewModelScope.launch {
+            try {
+                val uid = _user.value?.mid ?: run {
+                    _isBatchCalibrating.value = false
+                    return@launch
                 }
-                allFollowings.addAll(list.map { it.mid })
-                addDebugLog("获取关注列表第$page 页: ${list.size} 个")
-                if (list.size < 50) break
-                page++
-                delay(500) // 分页间隔防限流
-            }
+                addDebugLog("开始通过关注列表批量校准...")
 
-            addDebugLog("共获取 ${allFollowings.size} 个关注")
+                // 分页获取所有关注
+                val allFollowings = mutableSetOf<Long>()
+                var page = 1
+                while (true) {
+                    // 检查暂停
+                    while (_isBatchCalibrationPaused.value) {
+                        delay(500)
+                    }
 
-            // 对比僵尸榜并修正
-            val zombieList = _zombieFollowings.value
-            var fixed = 0
-            val updated = zombieList.map { (user, ts) ->
-                val actuallyFollowing = user.mid in allFollowings
-                val currentlyShown = user.attribute >= 2
-                if (currentlyShown != actuallyFollowing) {
-                    fixed++
-                    val newAttr = if (actuallyFollowing) 2 else 0
-                    val from = if (currentlyShown) "已关注" else "未关注"
-                    val to = if (actuallyFollowing) "已关注" else "未关注"
-                    addDebugLog("✅ ${user.uname}: $from → $to（已修正）")
-                    user.copy(attribute = newAttr) to ts
-                } else {
-                    user to ts
+                    val result = getFollowings(uid, page, 50)
+                    val list = result.getOrNull()
+                    if (list == null) {
+                        addDebugLog("获取关注列表第$page 页失败")
+                        break
+                    }
+                    allFollowings.addAll(list.map { it.mid })
+                    addDebugLog("获取关注列表第$page 页: ${list.size} 个")
+                    if (list.size < 50) break
+                    page++
+                    delay(500) // 分页间隔防限流
                 }
-            }
 
-            _zombieFollowings.value = updated
-            saveZombieData()
-            addDebugLog("校准完成：获取了 ${allFollowings.size} 个关注，修正了 $fixed 个")
-            onComplete()
+                addDebugLog("共获取 ${allFollowings.size} 个关注")
+
+                // 对比僵尸榜并修正
+                var fixed = 0
+                val zombieList = _zombieFollowings.value
+                val updated = zombieList.map { (user, ts) ->
+                    // 检查暂停
+                    while (_isBatchCalibrationPaused.value) {
+                        delay(500)
+                    }
+
+                    val actuallyFollowing = user.mid in allFollowings
+                    val currentlyShown = user.attribute >= 2
+                    if (currentlyShown != actuallyFollowing) {
+                        fixed++
+                        val newAttr = if (actuallyFollowing) 2 else 0
+                        val from = if (currentlyShown) "已关注" else "未关注"
+                        val to = if (actuallyFollowing) "已关注" else "未关注"
+                        addDebugLog("✅ ${user.uname}: $from → $to（已修正）")
+                        user.copy(attribute = newAttr) to ts
+                    } else {
+                        user to ts
+                    }
+                }
+
+                _zombieFollowings.value = updated
+                saveZombieData()
+                addDebugLog("校准完成：获取了 ${allFollowings.size} 个关注，修正了 $fixed 个")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                addDebugLog("全校准已中断")
+            } finally {
+                _isBatchCalibrating.value = false
+                _isBatchCalibrationPaused.value = false
+                onComplete()
+            }
         }
     }
 
@@ -696,56 +756,16 @@ class AppViewModel(context: Context) : ViewModel() {
         _lastNavigatedMid.value = mid
     }
 
-    /** App 从后台恢复时调用（Lifecycle ON_RESUME） */
+    /** App 从后台恢复时调用（Lifecycle ON_RESUME）
+     * 改用 WebView 单条校准，绕过 API 风控 */
     fun onAppResumed() {
         val mid = _lastNavigatedMid.value ?: return
         _lastNavigatedMid.value = null
-        addDebugLog("🔄 从浏览器返回，校准 mid=$mid")
-        // 使用 getRelationStatus 快速查询（单条，不易触发风控）
+        addDebugLog("🔄 从浏览器返回，WebView 校准 mid=$mid")
+        // 延迟 1.5 秒等浏览器完全退出、网络恢复，然后加入 WebView 校准队列
         viewModelScope.launch {
-            delay(300) // 稍等片刻确保网络恢复
-            getRelationStatus(mid).fold(
-                onSuccess = { realAttr ->
-                    val zombieMap = _zombieFollowings.value.associateBy { it.first.mid }
-                    val pair = zombieMap[mid]
-                    if (pair != null) {
-                        val (user, ts) = pair
-                        val currentlyShown = user.attribute >= 2
-                        val actuallyFollowing = realAttr >= 2
-                        if (currentlyShown != actuallyFollowing) {
-                            val updated = user.copy(attribute = if (actuallyFollowing) 2 else 0)
-                            _zombieFollowings.value = _zombieFollowings.value.map {
-                                if (it.first.mid == mid) updated to ts else it
-                            }
-                            saveZombieData()
-                            val from = if (currentlyShown) "已关注" else "未关注"
-                            val to = if (actuallyFollowing) "已关注" else "未关注"
-                            addDebugLog("✅ ${user.uname}: $from → $to（返回校准）")
-                        } else {
-                            addDebugLog("✅ ${user.uname}: 状态一致（${if (actuallyFollowing) "已关注" else "未关注"}）")
-                        }
-                    }
-                },
-                onFailure = { err ->
-                    val msg = err.message ?: "未知错误"
-                    when {
-                        msg.contains("HTML_BLOCK") -> {
-                            addDebugLog("❌ mid=$mid: 被风控，跳过校准")
-                        }
-                        msg.contains("code=-404") || msg.contains("code=22007") || msg.contains("用户不存在") -> {
-                            // 用户已注销/不存在，从僵尸榜移除
-                            val zombieMap = _zombieFollowings.value.associateBy { it.first.mid }
-                            val user = zombieMap[mid]?.first
-                            _zombieFollowings.value = _zombieFollowings.value.filter { it.first.mid != mid }
-                            saveZombieData()
-                            addDebugLog("🗑️ ${user?.uname ?: "mid=$mid"}: 用户不存在，已移除")
-                        }
-                        else -> {
-                            addDebugLog("❌ mid=$mid: 查询失败 ($msg)")
-                        }
-                    }
-                }
-            )
+            delay(1500)
+            enqueueWebViewCalibration(listOf(mid))
         }
     }
 
@@ -778,16 +798,28 @@ class AppViewModel(context: Context) : ViewModel() {
     private val _webViewProcessing = MutableStateFlow(false)
     val webViewProcessing: StateFlow<Boolean> = _webViewProcessing.asStateFlow()
 
-    /** 启动 WebView 校准队列 */
+    /** 启动 WebView 校准队列（会清空旧队列） */
     fun startWebViewCalibration(mids: List<Long>) {
+        if (mids.isEmpty()) return
         if (_webViewProcessing.value) {
-            addDebugLog("WebView 校准已在运行，跳过")
-            return
+            addDebugLog("WebView 校准已在运行，覆盖旧队列")
         }
         _webViewQueue.value = mids
         _webViewProcessing.value = true
         addDebugLog("WebView 校准启动：${mids.size} 个UP")
         processNextWebViewItem()
+    }
+
+    /** 加入 WebView 校准队列（如果正在运行则追加，否则启动） */
+    fun enqueueWebViewCalibration(mids: List<Long>) {
+        if (mids.isEmpty()) return
+        if (_webViewProcessing.value) {
+            // 正在运行，追加到队列
+            _webViewQueue.value = _webViewQueue.value + mids
+            addDebugLog("WebView 校准追加 ${mids.size} 个UP到队列")
+        } else {
+            startWebViewCalibration(mids)
+        }
     }
 
     /** WebView 加载完成后的回调 */
@@ -796,10 +828,21 @@ class AppViewModel(context: Context) : ViewModel() {
     }
 
     /** JS Bridge 回调：报告关注状态（带 mid 校验） */
-    fun reportWebViewResult(mid: Long, isFollowing: Boolean) {
+    fun reportWebViewResult(mid: Long, isFollowing: Boolean, isTimeout: Boolean = false) {
         // 校验：如果当前处理的不是这个 mid，忽略（旧 WebView 的延迟回调）
         if (_webViewCurrentMid.value != mid) {
             addDebugLog("⚠️ 忽略延迟回调: mid=$mid, 当前=${_webViewCurrentMid.value}")
+            return
+        }
+
+        // 超时：不做任何状态修改，避免误伤
+        if (isTimeout) {
+            val user = _zombieFollowings.value.find { it.first.mid == mid }?.first
+            addDebugLog("⏱️ ${user?.uname ?: "mid=$mid"}: WebView校准超时，保持原状态")
+            viewModelScope.launch {
+                delay(500)
+                processNextWebViewItem()
+            }
             return
         }
 
@@ -959,55 +1002,63 @@ class AppViewModel(context: Context) : ViewModel() {
             val currentInFollower = _followers.value.find { it.mid == user.mid }
             val current = currentInZombie ?: currentInFollowing ?: currentInFollower ?: user
             val actuallyFollowing = current.attribute >= 2
+            val isSpecial = current.special == 1
+
+            // 特别关注 → 退化到普通关注
+            if (isSpecial) {
+                setSpecialFollow(user.mid, false).fold(
+                    onSuccess = {
+                        val updatedUser = user.copy(attribute = 2, special = 0)
+                        updateUserInAllLists(updatedUser)
+                        saveZombieData()
+                        _error.value = "${user.uname} 已取消特别关注"
+                    },
+                    onFailure = { err ->
+                        _error.value = "取消特别关注失败: ${err.message}"
+                    }
+                )
+                return@launch
+            }
 
             val act = if (actuallyFollowing) 2 else 1
             modifyRelation(user.mid, act).fold(
                 onSuccess = {
-                    val updatedUser = user.copy(attribute = if (actuallyFollowing) 0 else 2)
                     if (actuallyFollowing) {
                         // 取关：只改attribute，保留在列表中
-                        _zombieFollowings.value = _zombieFollowings.value.map {
-                            if (it.first.mid == user.mid) updatedUser to it.second else it
-                        }
-                        _followings.value = _followings.value.map {
-                            if (it.mid == user.mid) updatedUser else it
-                        }
-                        _followers.value = _followers.value.map {
-                            if (it.mid == user.mid) updatedUser else it
-                        }
+                        val updatedUser = user.copy(attribute = 0, special = 0)
+                        updateUserInAllLists(updatedUser)
+                        saveZombieData()
+                        _error.value = "已取关 ${user.uname}"
                     } else {
-                        // 关注：更新attribute
-                        _followers.value = _followers.value.map { if (it.mid == user.mid) updatedUser else it }
-                        _zombieFollowers.value = _zombieFollowers.value.map { if (it.mid == user.mid) updatedUser else it }
-                        _zombieFollowings.value = _zombieFollowings.value.map {
-                            if (it.first.mid == user.mid) updatedUser to it.second else it
-                        }
+                        // 关注：更新attribute，并弹出Snackbar带"设为特别关注"
+                        val updatedUser = user.copy(attribute = 2, special = 0)
+                        updateUserInAllLists(updatedUser)
+                        saveZombieData()
+                        _snackbarEvent.value = SnackbarEvent(
+                            message = "已关注 ${user.uname}",
+                            actionLabel = "设为特别关注",
+                            userMid = user.mid
+                        )
                     }
-                    saveZombieData()
-                    _error.value = if (actuallyFollowing) "已取关 ${user.uname}" else "已关注 ${user.uname}"
                 },
                 onFailure = { err ->
                     val msg = err.message ?: ""
                     // API报"已经关注"但UI显示未关注：回写为已关注
                     if (msg.contains("已经关注") || msg.contains("22014")) {
                         val updated = user.copy(attribute = 2)
-                        _zombieFollowings.value = _zombieFollowings.value.map {
-                            if (it.first.mid == user.mid) updated to it.second else it
-                        }
-                        _followings.value = _followings.value.map { if (it.mid == user.mid) updated else it }
-                        _followers.value = _followers.value.map { if (it.mid == user.mid) updated else it }
+                        updateUserInAllLists(updated)
                         saveZombieData()
-                        _error.value = "${user.uname} 已关注"
+                        _snackbarEvent.value = SnackbarEvent(
+                            message = "${user.uname} 已关注",
+                            actionLabel = "设为特别关注",
+                            userMid = user.mid
+                        )
                         return@fold
                     }
                     // API报"未关注"但UI显示已关注：回写为未关注
                     if (msg.contains("未关注") || msg.contains("22013")) {
-                        val updated = user.copy(attribute = 0)
-                        _zombieFollowings.value = _zombieFollowings.value.map {
-                            if (it.first.mid == user.mid) updated to it.second else it
-                        }
-                        _followings.value = _followings.value.map { if (it.mid == user.mid) updated else it }
-                        _followers.value = _followers.value.map { if (it.mid == user.mid) updated else it }
+                        val updated = user.copy(attribute = 0, special = 0)
+                        updateUserInAllLists(updated)
                         saveZombieData()
                         _error.value = "${user.uname} 已取关"
                         return@fold
@@ -1016,6 +1067,48 @@ class AppViewModel(context: Context) : ViewModel() {
                 }
             )
         }
+    }
+
+    /** 通过Snackbar action设为特别关注 */
+    fun setSpecialFollowFromSnackbar(mid: Long) {
+        viewModelScope.launch {
+            val user = findUserByMid(mid) ?: return@launch
+            setSpecialFollow(user.mid, true).fold(
+                onSuccess = {
+                    val updated = user.copy(attribute = 2, special = 1)
+                    updateUserInAllLists(updated)
+                    saveZombieData()
+                    // 不额外弹提示，按钮颜色变化即为反馈
+                },
+                onFailure = { err ->
+                    _error.value = "设为特别关注失败: ${err.message}"
+                }
+            )
+        }
+    }
+
+    /** 辅助：在所有列表中查找并更新用户 */
+    private fun updateUserInAllLists(updated: BiliUser) {
+        _zombieFollowings.value = _zombieFollowings.value.map {
+            if (it.first.mid == updated.mid) updated to it.second else it
+        }
+        _followings.value = _followings.value.map {
+            if (it.mid == updated.mid) updated else it
+        }
+        _followers.value = _followers.value.map {
+            if (it.mid == updated.mid) updated else it
+        }
+        _zombieFollowers.value = _zombieFollowers.value.map {
+            if (it.mid == updated.mid) updated else it
+        }
+    }
+
+    /** 辅助：通过mid查找用户 */
+    private fun findUserByMid(mid: Long): BiliUser? {
+        return _zombieFollowings.value.find { it.first.mid == mid }?.first
+            ?: _followings.value.find { it.mid == mid }
+            ?: _followers.value.find { it.mid == mid }
+            ?: _zombieFollowers.value.find { it.mid == mid }
     }
 
     /** 僵尸榜中是否有已取关但未清理的UP主 */

@@ -12,6 +12,7 @@
         android:allowBackup="true"
         android:usesCleartextTraffic="false"
         android:label="B站助手"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <provider

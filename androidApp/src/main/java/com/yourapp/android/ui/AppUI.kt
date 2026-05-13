@@ -86,10 +86,35 @@ fun AppUI(
     var selectedTab by remember { mutableStateOf(0) }
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarEvent by vm.snackbarEvent.collectAsStateWithLifecycle()
+
     LaunchedEffect(error) {
-        if (error != null) {
-            snackbarHostState.showSnackbar(error!!)
+        val err = error
+        if (err != null) {
+            // 后出来的提示立即覆盖当前显示的
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(
+                message = err,
+                duration = SnackbarDuration.Short
+            )
             vm.clearError()
+        }
+    }
+
+    LaunchedEffect(snackbarEvent) {
+        val evt = snackbarEvent
+        if (evt != null) {
+            // 后出来的提示立即覆盖当前显示的（不再区分优先级）
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = evt.message,
+                actionLabel = evt.actionLabel,
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed && evt.userMid != null) {
+                vm.setSpecialFollowFromSnackbar(evt.userMid)
+            }
+            vm.clearSnackbarEvent()
         }
     }
 
@@ -611,12 +636,60 @@ fun MainScreen(
                         Row {
                             // 全校准按钮（绕过风控，用关注列表批量比对）
                             val hasZombieUp = showZombieView && selectedTab == 0 && zombieFollowings.isNotEmpty()
+                            val isBatchCalibrating by vm.isBatchCalibrating.collectAsStateWithLifecycle()
+                            val isBatchPaused by vm.isBatchCalibrationPaused.collectAsStateWithLifecycle()
+                            var showPauseDialog by remember { mutableStateOf(false) }
+
                             if (hasZombieUp && !isCurrentSearching) {
                                 TextButton(
-                                    onClick = { vm.batchCalibrateByFollowingList() },
+                                    onClick = {
+                                        if (!isBatchCalibrating) {
+                                            vm.batchCalibrateByFollowingList()
+                                        } else if (!isBatchPaused) {
+                                            vm.pauseBatchCalibration()
+                                        } else {
+                                            showPauseDialog = true
+                                        }
+                                    },
                                     enabled = !isRechecking
                                 ) {
-                                    Text("全校准", style = MaterialTheme.typography.labelSmall)
+                                    Text(
+                                        when {
+                                            !isBatchCalibrating -> "全校准"
+                                            !isBatchPaused -> "暂停"
+                                            else -> "暂停"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+
+                                // 暂停对话框
+                                if (showPauseDialog) {
+                                    AlertDialog(
+                                        onDismissRequest = { showPauseDialog = false },
+                                        title = { Text("全校准已暂停") },
+                                        text = { Text("选择操作") },
+                                        confirmButton = {
+                                            TextButton(
+                                                onClick = {
+                                                    vm.resumeBatchCalibration()
+                                                    showPauseDialog = false
+                                                }
+                                            ) {
+                                                Text("继续")
+                                            }
+                                        },
+                                        dismissButton = {
+                                            TextButton(
+                                                onClick = {
+                                                    vm.stopBatchCalibration()
+                                                    showPauseDialog = false
+                                                }
+                                            ) {
+                                                Text("停止")
+                                            }
+                                        }
+                                    )
                                 }
                             }
                             // 校准当前可见按钮（debug 手动触发，WebView 方案）
@@ -691,8 +764,8 @@ fun MainScreen(
                 CalibrationWebView(
                     mid = mid,
                     cookieString = vm.getWebViewCookie(),
-                    onResult = { resultMid, isFollowing ->
-                        vm.reportWebViewResult(resultMid, isFollowing)
+                    onResult = { resultMid, isFollowing, isTimeout ->
+                        vm.reportWebViewResult(resultMid, isFollowing, isTimeout)
                     },
                     modifier = Modifier.size(1.dp).alpha(0f)
                 )
@@ -768,7 +841,13 @@ fun UserListItem(
     onNameClick: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val isFollowing = user.attribute >= 2
+    val status = com.yourapp.domain.FollowStatus.fromAttribute(user.attribute, user.special)
+
+    val btnColor = when (status) {
+        com.yourapp.domain.FollowStatus.SPECIAL -> MaterialTheme.colorScheme.secondary
+        com.yourapp.domain.FollowStatus.NORMAL -> MaterialTheme.colorScheme.onSurfaceVariant
+        com.yourapp.domain.FollowStatus.NONE -> MaterialTheme.colorScheme.primary
+    }
 
     Card(
         modifier = Modifier
@@ -803,14 +882,10 @@ fun UserListItem(
                 Text("UID: ${user.mid}", style = MaterialTheme.typography.bodySmall)
             }
             TextButton(
-                onClick = { onToggleFollow(user, isFollowing) },
-                colors = if (isFollowing) {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                }
+                onClick = { onToggleFollow(user, user.attribute >= 2) },
+                colors = ButtonDefaults.textButtonColors(contentColor = btnColor)
             ) {
-                Text(if (isFollowing) "已关注" else "+关注")
+                Text(status.label)
             }
         }
     }
@@ -912,7 +987,12 @@ fun ZombieFollowingItem(
         }
     }
 
-    val isFollowing = user.attribute >= 2
+    val status = com.yourapp.domain.FollowStatus.fromAttribute(user.attribute, user.special)
+    val btnColor = when (status) {
+        com.yourapp.domain.FollowStatus.SPECIAL -> MaterialTheme.colorScheme.secondary
+        com.yourapp.domain.FollowStatus.NORMAL -> MaterialTheme.colorScheme.onSurfaceVariant
+        com.yourapp.domain.FollowStatus.NONE -> MaterialTheme.colorScheme.primary
+    }
 
     Card(
         modifier = Modifier
@@ -958,14 +1038,10 @@ fun ZombieFollowingItem(
                 }
             }
             TextButton(
-                onClick = { onToggleFollow(user, isFollowing) },
-                colors = if (isFollowing) {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                }
+                onClick = { onToggleFollow(user, user.attribute >= 2) },
+                colors = ButtonDefaults.textButtonColors(contentColor = btnColor)
             ) {
-                Text(if (isFollowing) "已关注" else "+关注")
+                Text(status.label)
             }
         }
     }
@@ -998,7 +1074,12 @@ fun ZombieFollowerItem(
 ) {
     val context = LocalContext.current
     val isDefault = isDefaultUsername(user.uname)
-    val isFollowing = user.attribute >= 2
+    val status = com.yourapp.domain.FollowStatus.fromAttribute(user.attribute, user.special)
+    val btnColor = when (status) {
+        com.yourapp.domain.FollowStatus.SPECIAL -> MaterialTheme.colorScheme.secondary
+        com.yourapp.domain.FollowStatus.NORMAL -> MaterialTheme.colorScheme.onSurfaceVariant
+        com.yourapp.domain.FollowStatus.NONE -> MaterialTheme.colorScheme.primary
+    }
 
     Card(
         modifier = Modifier
@@ -1047,14 +1128,10 @@ fun ZombieFollowerItem(
                 }
             }
             TextButton(
-                onClick = { onToggleFollow(user, isFollowing) },
-                colors = if (isFollowing) {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                }
+                onClick = { onToggleFollow(user, user.attribute >= 2) },
+                colors = ButtonDefaults.textButtonColors(contentColor = btnColor)
             ) {
-                Text(if (isFollowing) "已关注" else "+关注")
+                Text(status.label)
             }
         }
     }

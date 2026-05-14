@@ -490,51 +490,62 @@ fun MainScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Tab 切换（带僵尸视图切换功能）
+            // Tab 切换（纯切换页面，不带视图切换）
             TabRow(
                 selectedTabIndex = selectedTab,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // 关注 Tab：普通状态显示"关注"，有僵尸结果时显示"僵尸UP⇄"，点击可切换视图
-                val followingTabText = when {
-                    showZombieView && zombieFollowings.isNotEmpty() -> "僵尸UP⇄"
-                    isSearchingFollowings -> "僵尸UP⇄"
-                    else -> "关注"
-                }
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { 
-                        if (selectedTab == 0 && (zombieFollowings.isNotEmpty() || isSearchingFollowings)) {
-                            // 已在关注页且有僵尸数据，点击切换视图
-                            vm.toggleZombieView()
-                        } else {
-                            onTabChange(0)
-                            // 从粉丝页切回关注页时，重置为普通视图
-                            if (showZombieView && selectedTab == 1) vm.toggleZombieView()
-                        }
+                        onTabChange(0)
+                        // 切到关注页时，显示关注的普通视图
+                        if (showZombieView) vm.toggleZombieView()
                     },
-                    text = { Text(followingTabText) }
+                    text = { Text("关注") }
                 )
-                
-                // 粉丝 Tab：普通状态显示"粉丝"，有僵尸结果时显示"僵尸粉⇄"，点击可切换视图
-                val followerTabText = when {
-                    showZombieView && zombieFollowers.isNotEmpty() -> "僵尸粉⇄"
-                    isSearchingFollowers -> "僵尸粉⇄"
-                    else -> "粉丝"
-                }
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { 
-                        if (selectedTab == 1 && (zombieFollowers.isNotEmpty() || isSearchingFollowers)) {
-                            // 已在粉丝页且有僵尸数据，点击切换视图
-                            vm.toggleZombieView()
-                        } else {
-                            onTabChange(1)
-                            // 从关注页切回粉丝页时，重置为普通视图
-                            if (showZombieView && selectedTab == 0) vm.toggleZombieView()
-                        }
+                        onTabChange(1)
+                        // 切到粉丝页时，显示粉丝的普通视图
+                        if (showZombieView) vm.toggleZombieView()
                     },
-                    text = { Text(followerTabText) }
+                    text = { Text("粉丝") }
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // 列表标题行（带视图切换功能）
+            val followingTitle = when {
+                showZombieView && zombieFollowings.isNotEmpty() -> "僵尸UP⇄"
+                showZombieView && zombieFollowings.isEmpty() && !isSearchingFollowings -> "僵尸UP⇄"
+                isSearchingFollowings -> "僵尸UP⇄"
+                else -> "关注"
+            }
+            val followerTitle = when {
+                showZombieView && zombieFollowers.isNotEmpty() -> "僵尸粉⇄"
+                showZombieView && zombieFollowers.isEmpty() && !isSearchingFollowers -> "僵尸粉⇄"
+                isSearchingFollowers -> "僵尸粉⇄"
+                else -> "粉丝"
+            }
+            val currentTitle = if (selectedTab == 0) followingTitle else followerTitle
+            val canToggleZombie = when (selectedTab) {
+                0 -> zombieFollowings.isNotEmpty() || isSearchingFollowings
+                1 -> zombieFollowers.isNotEmpty() || isSearchingFollowers
+                else -> false
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    currentTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = if (canToggleZombie) Modifier.clickable { vm.toggleZombieView() } else Modifier
                 )
             }
 

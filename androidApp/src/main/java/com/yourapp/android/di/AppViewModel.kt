@@ -231,6 +231,7 @@ class AppViewModel(context: Context) : ViewModel() {
                 if (followingJson.isNotBlank()) {
                     val snapshot = saveJson.decodeFromString(ZombieFollowingSnapshot.serializer(), followingJson)
                     _zombieFollowings.value = snapshot.items.map { it.user to it.timestamp }
+                    addDebugLog("恢复关注僵尸榜: ${_zombieFollowings.value.size} 个")
                 }
 
                 // 恢复粉丝僵尸榜
@@ -238,12 +239,14 @@ class AppViewModel(context: Context) : ViewModel() {
                 if (followerJson.isNotBlank()) {
                     val snapshot = saveJson.decodeFromString(ZombieFollowerSnapshot.serializer(), followerJson)
                     _zombieFollowers.value = snapshot.items
+                    addDebugLog("恢复粉丝僵尸榜: ${_zombieFollowers.value.size} 个")
                 }
 
                 // 恢复视图状态
                 val showZombieFollowing = storage.getInt(com.yourapp.data.StorageKeys.SHOW_ZOMBIE_VIEW, 0) == 1
                 _showZombieFollowingView.value = showZombieFollowing
                 _showZombieFollowerView.value = false
+                addDebugLog("恢复视图状态: 关注侧=${showZombieFollowing}, 粉丝侧=false")
 
                 // 如果有恢复的数据，标记 searchType
                 if (_zombieFollowings.value.isNotEmpty()) {
@@ -287,6 +290,7 @@ class AppViewModel(context: Context) : ViewModel() {
                     com.yourapp.data.StorageKeys.SHOW_ZOMBIE_VIEW,
                     if (_showZombieFollowingView.value) 1 else 0
                 )
+                addDebugLog("保存视图状态: 关注侧=${_showZombieFollowingView.value}, 粉丝侧=${_showZombieFollowerView.value}")
             } catch (_: Exception) {
                 // 保存失败静默忽略
             }
@@ -439,6 +443,7 @@ class AppViewModel(context: Context) : ViewModel() {
         val uid = _user.value?.mid ?: return
         _showZombieFollowingView.value = true
         _searchType.value = _searchType.value or 1
+        addDebugLog("开始搜索僵尸UP，设置 showZombieFollowingView=true")
 
         // 清空旧结果（如果不是继续搜索）
         if (!continueFromLast) {
@@ -470,6 +475,7 @@ class AppViewModel(context: Context) : ViewModel() {
         val uid = _user.value?.mid ?: return
         _showZombieFollowerView.value = true
         _searchType.value = _searchType.value or 2
+        addDebugLog("开始搜索僵尸粉，设置 showZombieFollowerView=true")
 
         if (!continueFromLast) {
             _zombieFollowers.value = emptyList()
@@ -1012,11 +1018,13 @@ class AppViewModel(context: Context) : ViewModel() {
     /** 切换关注侧的僵尸榜/普通列表视图 */
     fun toggleZombieFollowingView() {
         _showZombieFollowingView.value = !_showZombieFollowingView.value
+        addDebugLog("切换关注侧视图: showZombieFollowingView=${_showZombieFollowingView.value}")
     }
     
     /** 切换粉丝侧的僵尸榜/普通列表视图 */
     fun toggleZombieFollowerView() {
         _showZombieFollowerView.value = !_showZombieFollowerView.value
+        addDebugLog("切换粉丝侧视图: showZombieFollowerView=${_showZombieFollowerView.value}")
     }
     
     /** 获取当前Tab对应的僵尸视图状态 */

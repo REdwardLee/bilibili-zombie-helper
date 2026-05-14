@@ -503,11 +503,11 @@ fun MainScreen(
                 selectedTabIndex = selectedTab,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // 关注 Tab 文本：根据当前视图状态显示
+                // 关注 Tab 文本：只根据关注侧自身状态显示，不受当前选中Tab影响
                 val followingTabText = when {
-                    selectedTab == 0 && showZombieFollowingView -> "僵尸UP⇄"  // 当前在僵尸视图，点击切回关注
-                    selectedTab == 0 && !showZombieFollowingView && (zombieFollowings.isNotEmpty() || isSearchingFollowings) -> "关注⇄"  // 当前在关注视图，有僵尸数据，点击切到僵尸
-                    else -> "关注"  // 无僵尸数据，纯 Tab
+                    showZombieFollowingView -> "僵尸UP⇄"  // 关注侧在僵尸视图
+                    !showZombieFollowingView && (zombieFollowings.isNotEmpty() || isSearchingFollowings) -> "关注⇄"  // 关注侧在普通视图，有僵尸数据
+                    else -> "关注"  // 无僵尸数据
                 }
                 Tab(
                     selected = selectedTab == 0,
@@ -522,11 +522,11 @@ fun MainScreen(
                     text = { Text(followingTabText) }
                 )
                 
-                // 粉丝 Tab 文本：根据当前视图状态显示
+                // 粉丝 Tab 文本：只根据粉丝侧自身状态显示，不受当前选中Tab影响
                 val followerTabText = when {
-                    selectedTab == 1 && showZombieFollowerView -> "僵尸粉⇄"  // 当前在僵尸视图，点击切回粉丝
-                    selectedTab == 1 && !showZombieFollowerView && (zombieFollowers.isNotEmpty() || isSearchingFollowers) -> "粉丝⇄"  // 当前在粉丝视图，有僵尸数据，点击切到僵尸
-                    else -> "粉丝"  // 无僵尸数据，纯 Tab
+                    showZombieFollowerView -> "僵尸粉⇄"  // 粉丝侧在僵尸视图
+                    !showZombieFollowerView && (zombieFollowers.isNotEmpty() || isSearchingFollowers) -> "粉丝⇄"  // 粉丝侧在普通视图，有僵尸数据
+                    else -> "粉丝"  // 无僵尸数据
                 }
                 Tab(
                     selected = selectedTab == 1,

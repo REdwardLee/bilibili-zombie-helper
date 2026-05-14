@@ -490,62 +490,51 @@ fun MainScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Tab 切换（纯切换页面，不带视图切换）
+            // Tab 切换（带僵尸视图切换功能，⇄表示可切换）
             TabRow(
                 selectedTabIndex = selectedTab,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                // 关注 Tab 文本：根据当前视图状态显示
+                val followingTabText = when {
+                    selectedTab == 0 && showZombieView -> "僵尸UP⇄"  // 当前在僵尸视图，点击切回关注
+                    selectedTab == 0 && !showZombieView && (zombieFollowings.isNotEmpty() || isSearchingFollowings) -> "关注⇄"  // 当前在关注视图，有僵尸数据，点击切到僵尸
+                    else -> "关注"  // 无僵尸数据，纯 Tab
+                }
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { 
-                        onTabChange(0)
-                        // 切到关注页时，显示关注的普通视图
-                        if (showZombieView) vm.toggleZombieView()
+                        if (selectedTab == 0 && (zombieFollowings.isNotEmpty() || isSearchingFollowings)) {
+                            // 已在关注页且有僵尸数据，点击切换视图
+                            vm.toggleZombieView()
+                        } else {
+                            onTabChange(0)
+                            // 从粉丝页切回关注页时，显示关注的普通视图
+                            if (showZombieView) vm.toggleZombieView()
+                        }
                     },
-                    text = { Text("关注") }
+                    text = { Text(followingTabText) }
                 )
+                
+                // 粉丝 Tab 文本：根据当前视图状态显示
+                val followerTabText = when {
+                    selectedTab == 1 && showZombieView -> "僵尸粉⇄"  // 当前在僵尸视图，点击切回粉丝
+                    selectedTab == 1 && !showZombieView && (zombieFollowers.isNotEmpty() || isSearchingFollowers) -> "粉丝⇄"  // 当前在粉丝视图，有僵尸数据，点击切到僵尸
+                    else -> "粉丝"  // 无僵尸数据，纯 Tab
+                }
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { 
-                        onTabChange(1)
-                        // 切到粉丝页时，显示粉丝的普通视图
-                        if (showZombieView) vm.toggleZombieView()
+                        if (selectedTab == 1 && (zombieFollowers.isNotEmpty() || isSearchingFollowers)) {
+                            // 已在粉丝页且有僵尸数据，点击切换视图
+                            vm.toggleZombieView()
+                        } else {
+                            onTabChange(1)
+                            // 从关注页切回粉丝页时，显示粉丝的普通视图
+                            if (showZombieView) vm.toggleZombieView()
+                        }
                     },
-                    text = { Text("粉丝") }
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // 列表标题行（带视图切换功能）
-            val followingTitle = when {
-                showZombieView && zombieFollowings.isNotEmpty() -> "僵尸UP⇄"
-                showZombieView && zombieFollowings.isEmpty() && !isSearchingFollowings -> "僵尸UP⇄"
-                isSearchingFollowings -> "僵尸UP⇄"
-                else -> "关注"
-            }
-            val followerTitle = when {
-                showZombieView && zombieFollowers.isNotEmpty() -> "僵尸粉⇄"
-                showZombieView && zombieFollowers.isEmpty() && !isSearchingFollowers -> "僵尸粉⇄"
-                isSearchingFollowers -> "僵尸粉⇄"
-                else -> "粉丝"
-            }
-            val currentTitle = if (selectedTab == 0) followingTitle else followerTitle
-            val canToggleZombie = when (selectedTab) {
-                0 -> zombieFollowings.isNotEmpty() || isSearchingFollowings
-                1 -> zombieFollowers.isNotEmpty() || isSearchingFollowers
-                else -> false
-            }
-            
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    currentTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = if (canToggleZombie) Modifier.clickable { vm.toggleZombieView() } else Modifier
+                    text = { Text(followerTabText) }
                 )
             }
 

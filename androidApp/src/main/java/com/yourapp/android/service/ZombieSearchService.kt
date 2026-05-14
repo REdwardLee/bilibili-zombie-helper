@@ -274,23 +274,25 @@ class ZombieSearchService : Service() {
             var hasMore = true
             var totalChecked = 0
 
-            // 恢复已有结果和断点
+            // 恢复已有结果（不清空旧数据，断点续传）
             try {
                 val followerJson = storage.getString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWERS, "")
                 if (followerJson.isNotBlank()) {
                     val snapshot = saveJson.decodeFromString(ZombieFollowerSnapshot.serializer(), followerJson)
                     allResults.addAll(snapshot.items)
-                    totalChecked = allResults.size
                 }
             } catch (_: Exception) { }
 
-            // 恢复断点
+            // 恢复断点，计算已检查的粉丝总数
             var startPage = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_PAGE, 1)
             var startIndex = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_INDEX, -1)
             if (startIndex >= pageSize - 1) {
                 startPage++
                 startIndex = -1
             }
+            // 计算断点前的已检查数：(startPage-1)*pageSize + (startIndex+1)
+            totalChecked = (startPage - 1) * pageSize + (startIndex + 1)
+            if (totalChecked < 0) totalChecked = 0
             page = startPage
 
             while (hasMore && isActive) {

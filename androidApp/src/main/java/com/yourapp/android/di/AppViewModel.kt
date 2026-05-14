@@ -82,7 +82,19 @@ class AppViewModel(context: Context) : ViewModel() {
     private val _zombieFollowers = MutableStateFlow<List<BiliUser>>(emptyList())
     val zombieFollowers: StateFlow<List<BiliUser>> = _zombieFollowers.asStateFlow()
 
-    // 僵尸UP搜索进度（支持继续搜索）
+    // 用户手动停止标志（区分暂停和自动完成）
+    private val _isUserStoppingSearch = MutableStateFlow(false)
+    private val _isUserStoppingFollowerSearch = MutableStateFlow(false)
+
+    // 搜索完成状态（用于按钮文字重置和提示）
+    private val _followingSearchCompleted = MutableStateFlow(false)
+    val followingSearchCompleted: StateFlow<Boolean> = _followingSearchCompleted.asStateFlow()
+
+    private val _followerSearchCompleted = MutableStateFlow(false)
+    val followerSearchCompleted: StateFlow<Boolean> = _followerSearchCompleted.asStateFlow()
+
+    fun clearFollowingSearchCompleted() { _followingSearchCompleted.value = false }
+    fun clearFollowerSearchCompleted() { _followerSearchCompleted.value = false }
     private val _followingSearchPage = MutableStateFlow(1)
     private val _followingSearchHasMore = MutableStateFlow(true)
 
@@ -122,6 +134,11 @@ class AppViewModel(context: Context) : ViewModel() {
     // 最近一次保存的 HTML 文件路径（被风控时保存）
     private val _lastHtmlDir = MutableStateFlow<String?>(null)
     val lastHtmlDir: StateFlow<String?> = _lastHtmlDir.asStateFlow()
+
+    init {
+        // 启动时自动加载本地保存的僵尸数据（退出重进后恢复）
+        reloadZombieData()
+    }
 
     fun toggleDebugOverlay() {
         if (BuildConfig.DEBUG) _showDebugOverlay.value = !_showDebugOverlay.value
@@ -477,8 +494,9 @@ class AppViewModel(context: Context) : ViewModel() {
         _isSearchingFollowers.value = true
     }
 
-    /** 停止搜索 */
+    /** 停止搜索（用户手动暂停） */
     fun stopFollowingSearch() {
+        _isUserStoppingSearch.value = true
         val intent = android.content.Intent(appContext, com.yourapp.android.service.ZombieSearchService::class.java).apply {
             action = com.yourapp.android.service.ZombieSearchService.ACTION_STOP
         }
@@ -487,11 +505,33 @@ class AppViewModel(context: Context) : ViewModel() {
     }
 
     fun stopFollowerSearch() {
+        _isUserStoppingFollowerSearch.value = true
         val intent = android.content.Intent(appContext, com.yourapp.android.service.ZombieSearchService::class.java).apply {
             action = com.yourapp.android.service.ZombieSearchService.ACTION_STOP
         }
         appContext.startService(intent)
         _isSearchingFollowers.value = false
+    }
+
+    /** Service 完成后调用（非用户手动暂停） */
+    fun onFollowingSearchCompleted() {
+        _isSearchingFollowings.value = false
+        if (!_isUserStoppingSearch.value) {
+            _followingSearchCompleted.value = true
+            _error.value = "搜寻僵尸UP已完成"
+        }
+        _isUserStoppingSearch.value = false
+        reloadZombieData()
+    }
+
+    fun onFollowerSearchCompleted() {
+        _isSearchingFollowers.value = false
+        if (!_isUserStoppingFollowerSearch.value) {
+            _followerSearchCompleted.value = true
+            _error.value = "搜寻僵尸粉已完成"
+        }
+        _isUserStoppingFollowerSearch.value = false
+        reloadZombieData()
     }
 
     /** 从本地存储重新加载僵尸数据（Service 后台保存后调用）
@@ -536,7 +576,7 @@ class AppViewModel(context: Context) : ViewModel() {
         }
     }
 
-    /** 刷新当前显示列表（普通列表刷新数据，僵尸榜清空重新搜索） */
+    /** 刷新当前显示列表（普通列表刷新分页数据，僵尸榜重新从头搜索） */
     fun refreshCurrentList(selectedTab: Int, showZombieView: Boolean) {
         if (showZombieView) {
             if (selectedTab == 0) {

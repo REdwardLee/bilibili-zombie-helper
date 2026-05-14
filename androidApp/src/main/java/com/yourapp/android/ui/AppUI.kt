@@ -83,6 +83,30 @@ fun AppUI(
     }
 
     var showLogoutDialog by remember { mutableStateOf(false) }
+
+    // 退出登录确认对话框
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("退出登录") },
+            text = { Text("确定要退出当前账号吗？") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.logout()
+                        showLogoutDialog = false
+                    }
+                ) {
+                    Text("退出")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
     var selectedTab by remember { mutableStateOf(0) }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -118,7 +142,31 @@ fun AppUI(
         }
     }
 
-    // 监听生命周期：从浏览器返回时触发校准
+    // 搜索完成提示（仅显示一次）
+    val followingSearchCompleted by vm.followingSearchCompleted.collectAsStateWithLifecycle()
+    val followerSearchCompleted by vm.followerSearchCompleted.collectAsStateWithLifecycle()
+
+    LaunchedEffect(followingSearchCompleted) {
+        if (followingSearchCompleted) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(
+                message = "搜寻僵尸UP已完成",
+                duration = SnackbarDuration.Short
+            )
+            vm.clearFollowingSearchCompleted()
+        }
+    }
+
+    LaunchedEffect(followerSearchCompleted) {
+        if (followerSearchCompleted) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(
+                message = "搜寻僵尸粉已完成",
+                duration = SnackbarDuration.Short
+            )
+            vm.clearFollowerSearchCompleted()
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -195,31 +243,7 @@ fun LoginScreen(vm: AppViewModel, onWebViewLogin: () -> Unit) {
             onClick = onWebViewLogin,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("WebView 登录")
-        }
-        Spacer(Modifier.height(12.dp))
-        TextButton(onClick = { showManualInput = !showManualInput }) {
-            Text("手动输入 Cookie")
-        }
-
-        if (showManualInput) {
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = cookieInput,
-                onValueChange = { cookieInput = it },
-                label = { Text("Cookie 字符串") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 4,
-                maxLines = 6
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = { vm.saveCookieAndLogin(cookieInput) },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = cookieInput.isNotBlank()
-            ) {
-                Text("登录")
-            }
+            Text("Bilibili账号登录")
         }
     }
 }
@@ -245,6 +269,8 @@ fun MainScreen(
     val followerProgress by vm.followerSearchProgress.collectAsStateWithLifecycle()
     val hasMoreFollowings by vm.hasMoreFollowings.collectAsStateWithLifecycle()
     val hasMoreFollowers by vm.hasMoreFollowers.collectAsStateWithLifecycle()
+    val followingSearchCompleted by vm.followingSearchCompleted.collectAsStateWithLifecycle()
+    val followerSearchCompleted by vm.followerSearchCompleted.collectAsStateWithLifecycle()
 
     // 监听后台 Service 状态
     val serviceRunning by com.yourapp.android.service.ZombieSearchService.serviceRunning.collectAsState()
@@ -262,8 +288,9 @@ fun MainScreen(
     // 同步 Service 搜索状态到 ViewModel
     LaunchedEffect(serviceRunning) {
         if (!serviceRunning) {
-            vm.stopFollowingSearch()
-            vm.stopFollowerSearch()
+            // 区分用户手动暂停和 Service 自动完成
+            if (isSearchingFollowings) vm.onFollowingSearchCompleted()
+            if (isSearchingFollowers) vm.onFollowerSearchCompleted()
         }
     }
 
@@ -395,8 +422,8 @@ fun MainScreen(
                         when {
                             isCurrentSearching && selectedTab == 0 -> vm.stopFollowingSearch()
                             isCurrentSearching && selectedTab == 1 -> vm.stopFollowerSearch()
-                            selectedTab == 0 -> vm.startZombieFollowingSearch(continueFromLast = hasZombieResult)
-                            selectedTab == 1 -> vm.startZombieFollowerSearch(continueFromLast = hasZombieResult)
+                            selectedTab == 0 -> vm.startZombieFollowingSearch(continueFromLast = buttonText == "继续搜寻僵尸UP")
+                            selectedTab == 1 -> vm.startZombieFollowerSearch(continueFromLast = buttonText == "继续搜寻僵尸粉")
                         }
                     }
                 ) {

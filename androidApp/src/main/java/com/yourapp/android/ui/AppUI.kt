@@ -490,69 +490,51 @@ fun MainScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // 列表标题行 + 返回普通列表
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    listTitle,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 僵尸视图切换按钮
-                    if (selectedTab == 0 && (zombieFollowings.isNotEmpty() || isSearchingFollowings)) {
-                        TextButton(onClick = { vm.toggleZombieView() }) {
-                            if (showZombieView) {
-                                Icon(
-                                    imageVector = Icons.Filled.ArrowForward,
-                                    contentDescription = "返回普通列表",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            } else {
-                                Text("僵尸榜")
-                            }
-                        }
-                    }
-                    if (selectedTab == 1 && (zombieFollowers.isNotEmpty() || isSearchingFollowers)) {
-                        TextButton(onClick = { vm.toggleZombieView() }) {
-                            if (showZombieView) {
-                                Icon(
-                                    imageVector = Icons.Filled.ArrowForward,
-                                    contentDescription = "返回普通列表",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            } else {
-                                Text("僵尸榜")
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Tab 切换（放在列表标题下面，好版本布局）
+            // Tab 切换（带僵尸视图切换功能）
             TabRow(
                 selectedTabIndex = selectedTab,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                // 关注 Tab：普通状态显示"关注"，有僵尸结果时显示"僵尸UP⇄"，点击可切换视图
+                val followingTabText = when {
+                    showZombieView && zombieFollowings.isNotEmpty() -> "僵尸UP⇄"
+                    isSearchingFollowings -> "僵尸UP⇄"
+                    else -> "关注"
+                }
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { 
-                        onTabChange(0)
-                        // 切换Tab时重置僵尸视图，避免粉丝页的僵尸状态带到关注页
-                        if (showZombieView) vm.toggleZombieView()
+                        if (selectedTab == 0 && (zombieFollowings.isNotEmpty() || isSearchingFollowings)) {
+                            // 已在关注页且有僵尸数据，点击切换视图
+                            vm.toggleZombieView()
+                        } else {
+                            onTabChange(0)
+                            // 从粉丝页切回关注页时，重置为普通视图
+                            if (showZombieView && selectedTab == 1) vm.toggleZombieView()
+                        }
                     },
-                    text = { Text("关注") }
+                    text = { Text(followingTabText) }
                 )
+                
+                // 粉丝 Tab：普通状态显示"粉丝"，有僵尸结果时显示"僵尸粉⇄"，点击可切换视图
+                val followerTabText = when {
+                    showZombieView && zombieFollowers.isNotEmpty() -> "僵尸粉⇄"
+                    isSearchingFollowers -> "僵尸粉⇄"
+                    else -> "粉丝"
+                }
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { 
-                        onTabChange(1)
-                        // 切换Tab时重置僵尸视图，避免关注页的僵尸状态带到粉丝页
-                        if (showZombieView) vm.toggleZombieView()
+                        if (selectedTab == 1 && (zombieFollowers.isNotEmpty() || isSearchingFollowers)) {
+                            // 已在粉丝页且有僵尸数据，点击切换视图
+                            vm.toggleZombieView()
+                        } else {
+                            onTabChange(1)
+                            // 从关注页切回粉丝页时，重置为普通视图
+                            if (showZombieView && selectedTab == 0) vm.toggleZombieView()
+                        }
                     },
-                    text = { Text("粉丝") }
+                    text = { Text(followerTabText) }
                 )
             }
 

@@ -538,12 +538,20 @@ fun MainScreen(
             ) {
                 Tab(
                     selected = selectedTab == 0,
-                    onClick = { onTabChange(0) },
+                    onClick = { 
+                        onTabChange(0)
+                        // 切换Tab时重置僵尸视图，避免粉丝页的僵尸状态带到关注页
+                        if (showZombieView) vm.toggleZombieView()
+                    },
                     text = { Text("关注") }
                 )
                 Tab(
                     selected = selectedTab == 1,
-                    onClick = { onTabChange(1) },
+                    onClick = { 
+                        onTabChange(1)
+                        // 切换Tab时重置僵尸视图，避免关注页的僵尸状态带到粉丝页
+                        if (showZombieView) vm.toggleZombieView()
+                    },
                     text = { Text("粉丝") }
                 )
             }

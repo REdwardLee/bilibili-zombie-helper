@@ -241,8 +241,9 @@ class AppViewModel(context: Context) : ViewModel() {
                 }
 
                 // 恢复视图状态
-                val showZombie = storage.getInt(com.yourapp.data.StorageKeys.SHOW_ZOMBIE_VIEW, 0) == 1
-                _showZombieView.value = showZombie
+                val showZombieFollowing = storage.getInt(com.yourapp.data.StorageKeys.SHOW_ZOMBIE_VIEW, 0) == 1
+                _showZombieFollowingView.value = showZombieFollowing
+                _showZombieFollowerView.value = false
 
                 // 如果有恢复的数据，标记 searchType
                 if (_zombieFollowings.value.isNotEmpty()) {
@@ -284,7 +285,7 @@ class AppViewModel(context: Context) : ViewModel() {
                 // 保存视图状态
                 storage.putInt(
                     com.yourapp.data.StorageKeys.SHOW_ZOMBIE_VIEW,
-                    if (_showZombieView.value) 1 else 0
+                    if (_showZombieFollowingView.value) 1 else 0
                 )
             } catch (_: Exception) {
                 // 保存失败静默忽略
@@ -436,7 +437,7 @@ class AppViewModel(context: Context) : ViewModel() {
     /** 开始搜索僵尸UP（通过前台服务后台运行） */
     fun startZombieFollowingSearch(continueFromLast: Boolean = false) {
         val uid = _user.value?.mid ?: return
-        _showZombieView.value = true
+        _showZombieFollowingView.value = true
         _searchType.value = _searchType.value or 1
 
         // 清空旧结果（如果不是继续搜索）
@@ -467,7 +468,7 @@ class AppViewModel(context: Context) : ViewModel() {
     /** 开始搜索僵尸粉（通过前台服务后台运行） */
     fun startZombieFollowerSearch(continueFromLast: Boolean = false) {
         val uid = _user.value?.mid ?: return
-        _showZombieView.value = true
+        _showZombieFollowerView.value = true
         _searchType.value = _searchType.value or 2
 
         if (!continueFromLast) {
@@ -1001,21 +1002,36 @@ class AppViewModel(context: Context) : ViewModel() {
         }
     }
 
-    // 视图切换：true=显示僵尸榜, false=显示普通列表
-    private val _showZombieView = MutableStateFlow(false)
-    val showZombieView: StateFlow<Boolean> = _showZombieView.asStateFlow()
+    // 视图切换：两侧独立
+    private val _showZombieFollowingView = MutableStateFlow(false)
+    val showZombieFollowingView: StateFlow<Boolean> = _showZombieFollowingView.asStateFlow()
+    
+    private val _showZombieFollowerView = MutableStateFlow(false)
+    val showZombieFollowerView: StateFlow<Boolean> = _showZombieFollowerView.asStateFlow()
 
-    /** 切换僵尸榜/普通列表视图（不清空数据） */
-    fun toggleZombieView() {
-        _showZombieView.value = !_showZombieView.value
-        saveZombieData()
+    /** 切换关注侧的僵尸榜/普通列表视图 */
+    fun toggleZombieFollowingView() {
+        _showZombieFollowingView.value = !_showZombieFollowingView.value
+    }
+    
+    /** 切换粉丝侧的僵尸榜/普通列表视图 */
+    fun toggleZombieFollowerView() {
+        _showZombieFollowerView.value = !_showZombieFollowerView.value
+    }
+    
+    /** 获取当前Tab对应的僵尸视图状态 */
+    fun isZombieViewActive(selectedTab: Int): Boolean = when (selectedTab) {
+        0 -> _showZombieFollowingView.value
+        1 -> _showZombieFollowerView.value
+        else -> false
     }
 
     fun clearZombieResults() {
         _zombieFollowings.value = emptyList()
         _zombieFollowers.value = emptyList()
         _searchType.value = 0
-        _showZombieView.value = false
+        _showZombieFollowingView.value = false
+        _showZombieFollowerView.value = false
         _followingSearchPage.value = 1
         _followingSearchHasMore.value = true
         _followerSearchPage.value = 1

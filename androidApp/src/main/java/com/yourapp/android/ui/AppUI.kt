@@ -237,7 +237,6 @@ fun LoginScreen(vm: AppViewModel, onWebViewLogin: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("登录 B站", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = onWebViewLogin,

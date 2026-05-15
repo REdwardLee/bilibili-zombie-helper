@@ -122,14 +122,12 @@ class ZombieSearchService : Service() {
             )
 
             val allResults = mutableListOf<Pair<BiliUser, Long>>()
-            var page = 1
             val pageSize = 50
             var hasMore = true
             var totalChecked = 0
-            var sessionChecked = 0 // 本次搜索的计数，每次重新开始搜索时从0开始
-            val sessionStartTime = System.currentTimeMillis()
+            var sessionChecked = 0
 
-            // 恢复已有结果和断点
+            // 恢复已有结果
             try {
                 val followingJson = storage.getString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWINGS, "")
                 if (followingJson.isNotBlank()) {
@@ -139,26 +137,30 @@ class ZombieSearchService : Service() {
                 }
             } catch (_: Exception) { }
 
-            // 恢复断点：上次搜索停止的位置
-            var startPage = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, 1)
-            var startIndex = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
-            // 如果上次停在页末，跳到下一页开头
-            if (startIndex >= pageSize - 1) {
-                startPage++
-                startIndex = -1
-            }
+            // 计算总页数
+            val totalPages = if (totalCount > 0) (totalCount + pageSize - 1) / pageSize else 1
+            android.util.Log.d("ZombieSearch", "totalCount=$totalCount, totalPages=$totalPages")
 
-            // 调整初始 page
-            page = startPage
+            // 恢复断点：从存储中读取上次停止的位置
+            var currentPage = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages)
+            var currentIndex = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
+            
+            // 如果断点无效，从最后一页开始
+            if (currentPage > totalPages || currentPage < 1) {
+                currentPage = totalPages
+                currentIndex = -1
+            }
+            
+            android.util.Log.d("ZombieSearch", "恢复断点: page=$currentPage, index=$currentIndex")
 
             while (hasMore && isActive) {
+                // 请求当前页
                 val batch = mutableListOf<BiliUser>()
-                getFollowings(uid, page, pageSize).fold(
+                getFollowings(uid, currentPage, pageSize).fold(
                     onSuccess = { list ->
                         if (list.isEmpty()) hasMore = false
                         else {
                             batch += list
-                            if (list.size < pageSize) hasMore = false
                         }
                     },
                     onFailure = { hasMore = false }
@@ -166,33 +168,31 @@ class ZombieSearchService : Service() {
 
                 if (batch.isEmpty()) break
 
-                for ((index, user) in batch.withIndex()) {
+                // 从后往前遍历这一页（最早关注的在页尾）
+                val reversedBatch = batch.reversed()
+                for ((index, user) in reversedBatch.withIndex()) {
                     if (!isActive) break
 
-                    // 断点续传：跳过已检查的部分（仅限断点所在页）
-                    if (page == startPage && index <= startIndex) continue
+                    // 断点续传：跳过已检查的部分
+                    if (currentPage == storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages) 
+                        && index <= currentIndex) continue
 
-                    // 重试循环：失败后重试同一个UP主
+                    // 检查UP主
                     var success = false
                     var retries = 0
                     while (!success && isActive) {
-                        // 计算延迟：失败后每分钟一次，正常按本次搜索计数分段
                         val delayMs = if (retries > 0) {
-                            60000L + Random.nextLong(0, 30000) // 失败重试：每分钟一次
+                            60000L + Random.nextLong(0, 30000)
                         } else {
-                            getDelayForCount(sessionChecked) // 本次搜索的分段节奏
+                            getDelayForCount(sessionChecked)
                         }
 
-                        if (sessionChecked > 0 || page > startPage) {
+                        if (sessionChecked > 0 || currentPage != totalPages) {
                             delay(delayMs)
                         }
 
                         val checkNum = totalChecked + 1
-                        val progressText = if (retries > 0) {
-                            "重试 ${user.uname} (第${retries}次, ${checkNum}/${totalCount})..."
-                        } else {
-                            "正在检查 ${user.uname} (${checkNum}/${totalCount})..."
-                        }
+                        val progressText = "正在检查 ${user.uname} (页${currentPage}, ${checkNum}/${totalCount})..."
                         _serviceProgress.value = progressText
                         updateNotification("正在搜索僵尸UP", progressText, checkNum, totalCount.coerceAtLeast(1))
                         sendProgressBroadcast(1, progressText, checkNum)
@@ -207,9 +207,8 @@ class ZombieSearchService : Service() {
                                 }
                                 success = true
                                 totalChecked++
-                                sessionChecked++ // 本次搜索计数增加
+                                sessionChecked++
 
-                                // 更新预估时间（基于分段延迟理论值）
                                 if (totalCount > 0) {
                                     val etaMs = estimateRemainingTime(sessionChecked, totalCount)
                                     _serviceEta.value = formatEta(etaMs)
@@ -217,25 +216,34 @@ class ZombieSearchService : Service() {
                             },
                             onFailure = {
                                 retries++
-                                // 不增加 totalChecked 和 sessionChecked，重试同一个
                             }
                         )
 
                         if (success) {
-                            // 排序并保存
+                            // 排序并保存结果
                             val sorted = allResults.sortedBy { it.second }
                             saveFollowingResults(storage, sorted)
-                            // 保存断点：当前页和索引
-                            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, page)
+                            
+                            // 保存断点：当前页和在倒序中的索引
+                            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, currentPage)
                             storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, index)
+                            android.util.Log.d("ZombieSearch", "保存断点: page=$currentPage, index=$index")
                         }
                     }
                 }
-                page++
+                
+                // 往前翻页（页码减小）
+                currentPage--
+                currentIndex = -1 // 新页从头开始
+                
+                // 当翻到第0页时结束
+                if (currentPage < 1) {
+                    hasMore = false
+                }
             }
 
             // 搜索完成，清除断点
-            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, 1)
+            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages)
             storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
 
             val finalText = "已完成 ${allResults.size} 个UP主"

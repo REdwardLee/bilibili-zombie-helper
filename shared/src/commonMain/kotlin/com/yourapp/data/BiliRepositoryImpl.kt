@@ -78,7 +78,9 @@ class BiliRepositoryImpl(
             parameter("vmid", vmid)
             parameter("pn", page)
             parameter("ps", pageSize)
-            parameter("order_type", "attention")
+            parameter("order", "desc") // desc = 倒序，最近关注在前
+            // order_type 留空 = 按关注时间排序
+            // order_type=attention = 最常访问排序
             header(HttpHeaders.Cookie, cookie)
         }
 

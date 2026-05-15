@@ -452,8 +452,8 @@ class AppViewModel(context: Context) : ViewModel() {
             _followingSearchHasMore.value = true
             viewModelScope.launch {
                 storage.putString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWINGS, "")
-                // 清除断点：从头开始搜索
-                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, 1)
+                // 清除断点：从头开始搜索（从最后一页开始）
+                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, Int.MAX_VALUE)
                 storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
             }
         }
@@ -483,8 +483,8 @@ class AppViewModel(context: Context) : ViewModel() {
             _followerSearchHasMore.value = true
             viewModelScope.launch {
                 storage.putString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWERS, "")
-                // 清除断点：从头开始搜索
-                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_PAGE, 1)
+                // 清除断点：从头开始搜索（从最后一页开始）
+                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_PAGE, Int.MAX_VALUE)
                 storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_INDEX, -1)
             }
         }
@@ -580,6 +580,17 @@ class AppViewModel(context: Context) : ViewModel() {
                     _searchType.value = _searchType.value or 2
                 }
             } catch (_: Exception) { }
+        }
+    }
+
+    /** 清空僵尸UP列表 */
+    fun clearZombieFollowings() {
+        viewModelScope.launch {
+            _zombieFollowings.value = emptyList()
+            storage.putString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWINGS, "")
+            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, Int.MAX_VALUE)
+            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
+            addDebugLog("已清空僵尸UP列表")
         }
     }
 

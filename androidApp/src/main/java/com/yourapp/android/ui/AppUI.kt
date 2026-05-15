@@ -732,7 +732,10 @@ fun MainScreen(
                                 }
                             }
                             TextButton(onClick = { vm.clearDebugLogs() }) {
-                                Text("清除", style = MaterialTheme.typography.labelSmall)
+                                Text("清除日志", style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(onClick = { vm.clearZombieFollowings() }) {
+                                Text("清空僵尸UP", style = MaterialTheme.typography.labelSmall)
                             }
                             TextButton(onClick = { vm.toggleDebugOverlay() }) {
                                 Text("关闭", style = MaterialTheme.typography.labelSmall)

@@ -21,12 +21,14 @@ import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -52,6 +54,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.FlowRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -606,6 +610,7 @@ fun MainScreen(
         var offsetY by remember { mutableFloatStateOf(0f) }
 
         if (BuildConfig.DEBUG) {
+            // 调试按钮在最上层
             FloatingActionButton(
                 onClick = { vm.toggleDebugOverlay() },
                 modifier = Modifier
@@ -619,14 +624,13 @@ fun MainScreen(
                             offsetY += dragAmount.y
                         }
                     }
+                    .zIndex(999f)
             ) {
                 Text("🐛", style = MaterialTheme.typography.titleMedium)
             }
 
-            // 调试日志面板（固定在顶部，高度可调）
+            // 调试日志面板（自动适应大小）
             if (showDebug) {
-                var panelHeight by remember { mutableFloatStateOf(160f) }
-
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -642,7 +646,9 @@ fun MainScreen(
                             RoundedCornerShape(8.dp)
                         )
                         .padding(8.dp)
+                        .zIndex(998f)
                 ) {
+                    // 标题行 + 设置按钮
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -653,37 +659,70 @@ fun MainScreen(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Row {
-                            // 全校准按钮（绕过风控，用关注列表批量比对）
+                        // 设置按钮（最右侧）
+                        var showDebugSettings by remember { mutableStateOf(false) }
+                        IconButton(
+                            onClick = { showDebugSettings = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "设置",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        if (showDebugSettings) {
+                            DebugFeatureSettingsDialog(
+                                onDismiss = { showDebugSettings = false },
+                                vm = vm
+                            )
+                        }
+                    }
+                    
+                    // 功能按钮网格展示（根据设置动态显示）- Chip风格
+                    val enabledFeatures by vm.debugFeatures.collectAsStateWithLifecycle()
+                    if (enabledFeatures.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        
+                        // 收集所有功能按钮
+                        val featureButtons = mutableListOf<@Composable () -> Unit>()
+                        
+                        // 全校准按钮
+                        if (DebugFeature.BATCH_CALIBRATE in enabledFeatures) {
                             val hasZombieUp = showZombieView && selectedTab == 0 && zombieFollowings.isNotEmpty()
                             val isBatchCalibrating by vm.isBatchCalibrating.collectAsStateWithLifecycle()
                             val isBatchPaused by vm.isBatchCalibrationPaused.collectAsStateWithLifecycle()
                             var showPauseDialog by remember { mutableStateOf(false) }
 
                             if (hasZombieUp && !isCurrentSearching) {
-                                TextButton(
-                                    onClick = {
-                                        if (!isBatchCalibrating) {
-                                            vm.batchCalibrateByFollowingList()
-                                        } else if (!isBatchPaused) {
-                                            vm.pauseBatchCalibration()
-                                        } else {
-                                            showPauseDialog = true
-                                        }
-                                    },
-                                    enabled = !isRechecking
-                                ) {
-                                    Text(
-                                        when {
-                                            !isBatchCalibrating -> "全校准"
-                                            !isBatchPaused -> "暂停"
-                                            else -> "暂停"
+                                featureButtons.add {
+                                    AssistChip(
+                                        onClick = {
+                                            if (!isBatchCalibrating) {
+                                                vm.batchCalibrateByFollowingList()
+                                            } else if (!isBatchPaused) {
+                                                vm.pauseBatchCalibration()
+                                            } else {
+                                                showPauseDialog = true
+                                            }
                                         },
-                                        style = MaterialTheme.typography.labelSmall
+                                        enabled = !isRechecking,
+                                        label = {
+                                            Text(
+                                                when {
+                                                    !isBatchCalibrating -> "🔧 全校准"
+                                                    !isBatchPaused -> "⏸ 暂停"
+                                                    else -> "⏸ 已暂停"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        },
+                                        colors = AssistChipDefaults.assistChipColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                        )
                                     )
                                 }
 
-                                // 暂停对话框
                                 if (showPauseDialog) {
                                     AlertDialog(
                                         onDismissRequest = { showPauseDialog = false },
@@ -712,68 +751,167 @@ fun MainScreen(
                                     )
                                 }
                             }
-                            // 校准当前可见按钮（debug 手动触发，WebView 方案）
-                            TextButton(
-                                onClick = { vm.calibrateVisible() },
-                                enabled = !isRechecking
-                            ) {
-                                Text("校准当前可见", style = MaterialTheme.typography.labelSmall)
+                        }
+                        
+                        // 校准当前可见按钮
+                        if (DebugFeature.CALIBRATE_VISIBLE in enabledFeatures) {
+                            featureButtons.add {
+                                AssistChip(
+                                    onClick = { vm.calibrateVisible() },
+                                    enabled = !isRechecking,
+                                    label = { Text("👁 校准可见", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                )
                             }
-                            // 打开日志保存目录
-                            val lastHtmlDir by vm.lastHtmlDir.collectAsStateWithLifecycle()
-                            if (lastHtmlDir != null) {
-                                TextButton(
+                        }
+                        
+                        // 打开日志保存目录
+                        if (DebugFeature.OPEN_LOG_DIR in enabledFeatures) {
+                            featureButtons.add {
+                                AssistChip(
                                     onClick = {
                                         val intent = vm.openHtmlDirectory()
                                         if (intent != null) context.startActivity(intent)
-                                    }
+                                    },
+                                    label = { Text("📁 日志目录", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                )
+                            }
+                        }
+                        
+                        // 保存日志按钮
+                        if (DebugFeature.SAVE_LOGS in enabledFeatures) {
+                            featureButtons.add {
+                                AssistChip(
+                                    onClick = { vm.saveDebugLogsToFile() },
+                                    label = { Text("💾 保存日志", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                )
+                            }
+                        }
+                        
+                        // 清除日志按钮
+                        if (DebugFeature.CLEAR_LOGS in enabledFeatures) {
+                            featureButtons.add {
+                                AssistChip(
+                                    onClick = { vm.clearDebugLogs() },
+                                    label = { Text("📝 清日志", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                )
+                            }
+                        }
+                        
+                        // 清空僵尸UP按钮
+                        if (DebugFeature.CLEAR_ZOMBIE in enabledFeatures) {
+                            featureButtons.add {
+                                AssistChip(
+                                    onClick = { vm.clearZombieFollowings() },
+                                    label = { Text("🗑 清空僵尸", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                )
+                            }
+                        }
+                        
+                        // 流式布局渲染（自动适应宽度）
+                        if (featureButtons.isNotEmpty()) {
+                            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                val maxWidth = maxWidth
+                                
+                                // 估算每行能放几个 chip
+                                val estimatedChipWidth = 100.dp
+                                val chipsPerRow = (maxWidth / estimatedChipWidth).toInt().coerceAtLeast(1)
+                                
+                                val allRows = featureButtons.chunked(chipsPerRow)
+                                
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text("打开日志目录", style = MaterialTheme.typography.labelSmall)
+                                    allRows.forEach { row ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            row.forEach { chip ->
+                                                chip()
+                                            }
+                                        }
+                                    }
                                 }
-                            }
-                            TextButton(onClick = { vm.clearDebugLogs() }) {
-                                Text("清除日志", style = MaterialTheme.typography.labelSmall)
-                            }
-                            TextButton(onClick = { vm.clearZombieFollowings() }) {
-                                Text("清空僵尸UP", style = MaterialTheme.typography.labelSmall)
-                            }
-                            TextButton(onClick = { vm.toggleDebugOverlay() }) {
-                                Text("关闭", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
-                    Divider()
-                    LazyColumn(
+                    
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    
+                    // 日志列表（全部显示，可滚动）
+                    var panelHeight by remember { mutableFloatStateOf(200f) }
+                    val minHeight = 100f
+                    val maxHeight = 500f
+                    
+                    Box(
                         modifier = Modifier
-                            .heightIn(max = panelHeight.dp)
-                            .fillMaxWidth(),
-                        reverseLayout = true
+                            .fillMaxWidth()
+                            .heightIn(min = minHeight.dp, max = panelHeight.dp)
                     ) {
-                        items(debugLogs.reversed()) { log ->
+                        if (debugLogs.isNotEmpty()) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                reverseLayout = false
+                            ) {
+                                items(debugLogs.reversed()) { log ->
+                                    Text(
+                                        log,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        } else {
                             Text(
-                                log,
+                                "暂无日志",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(vertical = 1.dp)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
                             )
                         }
                     }
-                    // 拖拽手柄
+                    
+                    // 拖拽手柄（在底部）- 1:1 跟手拖拽
+                    val density = LocalDensity.current
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(12.dp)
                             .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
+                                detectDragGestures(
+                                    onDragStart = { },
+                                    onDragEnd = { },
+                                    onDragCancel = { }
+                                ) { change, dragAmount ->
                                     change.consume()
-                                    panelHeight = (panelHeight + dragAmount.y).coerceIn(60f, 400f)
+                                    // dragAmount.y 是像素值，转换为 dp
+                                    val dragDp = dragAmount.y / density.density
+                                    panelHeight = (panelHeight + dragDp).coerceIn(minHeight, maxHeight)
                                 }
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Divider(
                             modifier = Modifier.width(40.dp),
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.outline,
+                            thickness = 2.dp
                         )
                     }
                 }

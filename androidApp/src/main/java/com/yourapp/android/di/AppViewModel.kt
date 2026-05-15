@@ -18,6 +18,7 @@ import kotlin.random.Random
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.yourapp.android.ui.DebugFeature
 
 /** 序列化辅助类 */
 @Serializable
@@ -95,6 +96,27 @@ class AppViewModel(context: Context) : ViewModel() {
 
     fun clearFollowingSearchCompleted() { _followingSearchCompleted.value = false }
     fun clearFollowerSearchCompleted() { _followerSearchCompleted.value = false }
+
+    // 调试功能列表
+    private val _debugFeatures = MutableStateFlow<Set<DebugFeature>>(
+        setOf(
+            DebugFeature.BATCH_CALIBRATE,
+            DebugFeature.CALIBRATE_VISIBLE,
+            DebugFeature.CLEAR_ZOMBIE,
+            DebugFeature.SAVE_LOGS,
+            DebugFeature.OPEN_LOG_DIR
+        )
+    )
+    val debugFeatures: StateFlow<Set<DebugFeature>> = _debugFeatures.asStateFlow()
+
+    fun addDebugFeature(feature: DebugFeature) {
+        _debugFeatures.value = _debugFeatures.value + feature
+    }
+
+    fun removeDebugFeature(feature: DebugFeature) {
+        _debugFeatures.value = _debugFeatures.value - feature
+    }
+
     private val _followingSearchPage = MutableStateFlow(1)
     private val _followingSearchHasMore = MutableStateFlow(true)
 
@@ -148,50 +170,91 @@ class AppViewModel(context: Context) : ViewModel() {
         if (BuildConfig.DEBUG) _debugLogs.value = emptyList()
     }
 
-    /** 打开日志保存目录（目录打开失败时 fallback 到打开最近文件） */
+    /** 打开日志保存目录 - 使用 DocumentsUI 直接打开指定目录 */
     fun openHtmlDirectory(): android.content.Intent? {
         val dir = java.io.File(appContext.getExternalFilesDir(null), "debug_html")
         if (!dir.exists()) dir.mkdirs()
         
+        addDebugLog("日志目录路径: ${dir.absolutePath}")
+        addDebugLog("目录存在: ${dir.exists()}, 文件数: ${dir.listFiles()?.size ?: 0}")
+        
         return try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                appContext,
-                "${appContext.packageName}.fileprovider",
-                dir
-            )
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "resource/folder")
+            // 方法1: 使用 DocumentsUI 直接打开目录 (Android 10+)
+            // 格式: content://com.android.externalstorage.documents/document/primary:Android%2Fdata%2F...
+            val relativePath = dir.absolutePath
+                .removePrefix("/storage/emulated/0/")
+                .removePrefix("/sdcard/")
+            
+            val encodedPath = relativePath.replace("/", "%2F")
+            val docUri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary:$encodedPath")
+            
+            addDebugLog("DocumentsUI URI: $docUri")
+            
+            val documentsIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setPackage("com.android.documentsui")
+                setDataAndType(docUri, "vnd.android.document/directory")
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            // 如果没有应用能处理目录，fallback 到打开最近一个文件
-            if (intent.resolveActivity(appContext.packageManager) == null) {
-                val lastFile = dir.listFiles()?.maxByOrNull { it.lastModified() }
-                if (lastFile != null) {
-                    val fileUri = androidx.core.content.FileProvider.getUriForFile(
-                        appContext,
-                        "${appContext.packageName}.fileprovider",
-                        lastFile
-                    )
-                    android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                        setDataAndType(fileUri, "text/html")
-                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                } else null
-            } else intent
+            
+            if (documentsIntent.resolveActivity(appContext.packageManager) != null) {
+                addDebugLog("使用 DocumentsUI 打开目录")
+                return documentsIntent
+            }
+            
+            // 方法2: 使用 ACTION_OPEN_DOCUMENT_TREE 让用户选择目录
+            val safIntent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            }
+            
+            if (safIntent.resolveActivity(appContext.packageManager) != null) {
+                addDebugLog("使用 SAF 打开")
+                return safIntent
+            }
+            
+            // 方法3: 使用 FileProvider + 通用 intent
+            val authority = "${BuildConfig.APPLICATION_ID}.fileprovider"
+            val uri = androidx.core.content.FileProvider.getUriForFile(appContext, authority, dir)
+            
+            val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "*/*")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            
+            addDebugLog("使用 FileProvider 通用 intent: $uri")
+            genericIntent
+            
         } catch (e: Exception) {
-            // 异常时 fallback
-            val lastFile = dir.listFiles()?.maxByOrNull { it.lastModified() }
-            if (lastFile != null) {
-                val fileUri = androidx.core.content.FileProvider.getUriForFile(
-                    appContext,
-                    "${appContext.packageName}.fileprovider",
-                    lastFile
-                )
-                android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                    setDataAndType(fileUri, "text/html")
-                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-            } else null
+            addDebugLog("打开日志目录失败: ${e.javaClass.simpleName}: ${e.message}")
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /** 保存调试日志到文件 */
+    fun saveDebugLogsToFile() {
+        if (!BuildConfig.DEBUG) return
+        val logs = _debugLogs.value
+        if (logs.isEmpty()) {
+            addDebugLog("没有日志可保存")
+            return
+        }
+        
+        try {
+            val dir = java.io.File(appContext.getExternalFilesDir(null), "debug_html")
+            dir.mkdirs()
+            
+            val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+            val file = java.io.File(dir, "logs_${timestamp}.txt")
+            
+            file.writeText(logs.joinToString("\n"))
+            
+            _lastHtmlDir.value = dir.absolutePath
+            addDebugLog("日志已保存: ${file.name} (${logs.size} 条)")
+        } catch (e: Exception) {
+            addDebugLog("保存日志失败: ${e.message}")
         }
     }
 

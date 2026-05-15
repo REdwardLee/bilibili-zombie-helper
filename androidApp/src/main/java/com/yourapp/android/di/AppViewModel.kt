@@ -483,8 +483,8 @@ class AppViewModel(context: Context) : ViewModel() {
             _followerSearchHasMore.value = true
             viewModelScope.launch {
                 storage.putString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWERS, "")
-                // 清除断点：从头开始搜索（从最后一页开始）
-                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_PAGE, Int.MAX_VALUE)
+                // 清除断点：从头开始搜索（从第1页开始往后翻）
+                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_PAGE, 1)
                 storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_INDEX, -1)
             }
         }

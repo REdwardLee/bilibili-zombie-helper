@@ -422,43 +422,71 @@ fun MainScreen(
                 )
             }
 
-            // 搜索控制行（按钮 + 刷新）
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            // 搜索控制行
+            if (isCurrentSearching) {
+                // 搜索中：搜索按钮独占一整行
                 Button(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        when {
-                            isCurrentSearching && selectedTab == 0 -> vm.stopFollowingSearch()
-                            isCurrentSearching && selectedTab == 1 -> vm.stopFollowerSearch()
-                            selectedTab == 0 -> vm.startZombieFollowingSearch(continueFromLast = buttonText == "继续搜寻僵尸UP")
-                            selectedTab == 1 -> vm.startZombieFollowerSearch(continueFromLast = buttonText == "继续搜寻僵尸粉")
+                        when (selectedTab) {
+                            0 -> vm.stopFollowingSearch()
+                            1 -> vm.stopFollowerSearch()
                         }
                     }
                 ) {
                     Icon(
-                        imageVector = if (isCurrentSearching) Icons.Default.Close else Icons.Default.Search,
+                        imageVector = Icons.Default.Close,
                         contentDescription = null
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(buttonText)
                 }
-
-                Spacer(Modifier.width(8.dp))
-
-                // 圆形刷新按钮
-                FilledIconButton(
-                    onClick = {
-                        vm.refreshCurrentList(selectedTab, showZombieView)
-                    },
-                    modifier = Modifier.size(48.dp)
+            } else {
+                // 未搜索：按钮 + 刷新
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "刷新"
-                    )
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            when (selectedTab) {
+                                0 -> vm.startZombieFollowingSearch(continueFromLast = buttonText == "继续搜寻僵尸UP")
+                                1 -> vm.startZombieFollowerSearch(continueFromLast = buttonText == "继续搜寻僵尸粉")
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(buttonText)
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
+                    // 刷新按钮：复用搜索按钮逻辑
+                    FilledIconButton(
+                        onClick = {
+                            when (selectedTab) {
+                                0 -> {
+                                    vm.clearZombieFollowings()
+                                    vm.startZombieFollowingSearch(continueFromLast = false)
+                                }
+                                1 -> {
+                                    vm.clearZombieFollowers()
+                                    vm.startZombieFollowerSearch(continueFromLast = false)
+                                }
+                            }
+                        },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "刷新"
+                        )
+                    }
                 }
             }
 
@@ -516,8 +544,8 @@ fun MainScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { 
-                        if (selectedTab == 0 && (zombieFollowings.isNotEmpty() || isSearchingFollowings)) {
-                            // 已在关注页且有僵尸数据，点击切换关注侧视图
+                        if (selectedTab == 0) {
+                            // 已在关注页，切换视图
                             vm.toggleZombieFollowingView()
                         } else {
                             onTabChange(0)
@@ -535,8 +563,8 @@ fun MainScreen(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { 
-                        if (selectedTab == 1 && (zombieFollowers.isNotEmpty() || isSearchingFollowers)) {
-                            // 已在粉丝页且有僵尸数据，点击切换粉丝侧视图
+                        if (selectedTab == 1) {
+                            // 已在粉丝页，切换视图
                             vm.toggleZombieFollowerView()
                         } else {
                             onTabChange(1)
@@ -814,7 +842,20 @@ fun MainScreen(
                             featureButtons.add {
                                 AssistChip(
                                     onClick = { vm.clearZombieFollowings() },
-                                    label = { Text("🗑 清空僵尸", style = MaterialTheme.typography.labelSmall) },
+                                    label = { Text("🗑 清僵尸UP", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                )
+                            }
+                        }
+                        
+                        // 清空僵尸粉按钮
+                        if (DebugFeature.CLEAR_ZOMBIE_FOLLOWERS in enabledFeatures) {
+                            featureButtons.add {
+                                AssistChip(
+                                    onClick = { vm.clearZombieFollowers() },
+                                    label = { Text("🗑 清僵尸粉", style = MaterialTheme.typography.labelSmall) },
                                     colors = AssistChipDefaults.assistChipColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
                                     )

@@ -17,12 +17,13 @@ enum class DebugFeature(val label: String, val icon: String) {
     BATCH_CALIBRATE("全校准", "🔧"),
     CALIBRATE_VISIBLE("校准当前可见", "👁"),
     CLEAR_ZOMBIE("清空僵尸UP", "🗑"),
+    CLEAR_ZOMBIE_FOLLOWERS("清空僵尸粉", "🗑"),
     CLEAR_LOGS("清除日志", "📝"),
     SAVE_LOGS("保存日志", "💾"),
     OPEN_LOG_DIR("打开日志目录", "📁");
 
     companion object {
-        val ALL = listOf(BATCH_CALIBRATE, CALIBRATE_VISIBLE, CLEAR_ZOMBIE, CLEAR_LOGS, SAVE_LOGS, OPEN_LOG_DIR)
+        val ALL = listOf(BATCH_CALIBRATE, CALIBRATE_VISIBLE, CLEAR_ZOMBIE, CLEAR_ZOMBIE_FOLLOWERS, CLEAR_LOGS, SAVE_LOGS, OPEN_LOG_DIR)
     }
 }
 

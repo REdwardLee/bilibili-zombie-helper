@@ -103,6 +103,7 @@ class AppViewModel(context: Context) : ViewModel() {
             DebugFeature.BATCH_CALIBRATE,
             DebugFeature.CALIBRATE_VISIBLE,
             DebugFeature.CLEAR_ZOMBIE,
+            DebugFeature.CLEAR_ZOMBIE_FOLLOWERS,
             DebugFeature.SAVE_LOGS,
             DebugFeature.OPEN_LOG_DIR
         )
@@ -529,7 +530,11 @@ class AppViewModel(context: Context) : ViewModel() {
             putExtra(com.yourapp.android.service.ZombieSearchService.EXTRA_COOKIE, cookie)
             putExtra(com.yourapp.android.service.ZombieSearchService.EXTRA_UID, uid)
         }
-        appContext.startService(intent)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            appContext.startForegroundService(intent)
+        } else {
+            appContext.startService(intent)
+        }
         _isSearchingFollowings.value = true
     }
 
@@ -560,7 +565,11 @@ class AppViewModel(context: Context) : ViewModel() {
             putExtra(com.yourapp.android.service.ZombieSearchService.EXTRA_COOKIE, cookie)
             putExtra(com.yourapp.android.service.ZombieSearchService.EXTRA_UID, uid)
         }
-        appContext.startService(intent)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            appContext.startForegroundService(intent)
+        } else {
+            appContext.startService(intent)
+        }
         _isSearchingFollowers.value = true
     }
 
@@ -657,17 +666,20 @@ class AppViewModel(context: Context) : ViewModel() {
         }
     }
 
-    /** 刷新当前显示列表（普通列表刷新分页数据，僵尸榜重新从头搜索） */
+    /** 清空僵尸粉列表 */
+    fun clearZombieFollowers() {
+        viewModelScope.launch {
+            _zombieFollowers.value = emptyList()
+            storage.putString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWERS, "")
+            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_PAGE, 1)
+            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWER_LAST_INDEX, -1)
+            addDebugLog("已清空僵尸粉列表")
+        }
+    }
+
+    /** 刷新当前列表（普通关注/粉丝列表） */
     fun refreshCurrentList(selectedTab: Int, showZombieView: Boolean) {
-        if (showZombieView) {
-            if (selectedTab == 0) {
-                _zombieFollowings.value = emptyList()
-                startZombieFollowingSearch(continueFromLast = false)
-            } else {
-                _zombieFollowers.value = emptyList()
-                startZombieFollowerSearch(continueFromLast = false)
-            }
-        } else {
+        if (!showZombieView) {
             if (selectedTab == 0) {
                 _followingPage.value = 1
                 _hasMoreFollowings.value = true

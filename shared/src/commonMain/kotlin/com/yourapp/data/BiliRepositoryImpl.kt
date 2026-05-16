@@ -11,6 +11,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
@@ -65,6 +67,93 @@ class BiliRepositoryImpl(
         require(body.code == 0) { "获取登录信息失败: ${body.message}" }
         
         body.data!!.toBiliUser()
+    }
+
+    /** 通过搜索API快速查找已注销账号（搜索"账号已注销"） */
+    override suspend fun searchDeletedFollowings(vmid: Long): Result<List<BiliUser>> = runCatching {
+        val cookie = getCookieHeader()
+        val deletedUsers = mutableListOf<BiliUser>()
+        var page = 1
+        val pageSize = 50
+        
+        while (true) {
+            val response = client.get("https://api.bilibili.com/x/relation/followings/search") {
+                parameter("vmid", vmid)
+                parameter("name", "注销")
+                parameter("pn", page)
+                parameter("ps", pageSize)
+                header(HttpHeaders.Cookie, cookie)
+            }
+            
+            val body: BiliResponse<FollowingsData> = response.body()
+            if (body.code != 0) break
+            
+            val users = body.data?.list ?: emptyList()
+            if (users.isEmpty()) break
+            
+            // 只保留真正的已注销账号（uname完全匹配）
+            val deleted = users.filter { it.uname == "账号已注销" }
+            deletedUsers.addAll(deleted.map { it.toBiliUser() })
+            
+            // 如果不足一页，说明搜完了
+            if (users.size < pageSize) break
+            
+            page++
+            delay(100)
+        }
+        
+        deletedUsers
+    }
+
+    /** 快速扫描关注列表中的已注销账号（通过昵称判断）- 完整扫描但优化速度 */
+    override suspend fun scanDeletedFollowings(vmid: Long): Result<List<BiliUser>> = runCatching {
+        val cookie = getCookieHeader()
+        val deletedUsers = mutableListOf<BiliUser>()
+        var page = 1
+        val pageSize = 50
+        
+        // 先获取总数
+        var totalPages = 1
+        try {
+            val statResponse = client.get("https://api.bilibili.com/x/relation/stat") {
+                parameter("vmid", vmid)
+                header(HttpHeaders.Cookie, cookie)
+            }
+            val statBody: BiliResponse<RelationStatData> = statResponse.body()
+            if (statBody.code == 0) {
+                val total = statBody.data?.following ?: 0
+                totalPages = (total + pageSize - 1) / pageSize
+                if (totalPages < 1) totalPages = 1
+            }
+        } catch (_: Exception) { }
+        
+        // 并发扫描所有页面
+        val jobs = (1..totalPages).map { pageNum ->
+            kotlinx.coroutines.GlobalScope.async {
+                try {
+                    val response = client.get("https://api.bilibili.com/x/relation/followings") {
+                        parameter("vmid", vmid)
+                        parameter("pn", pageNum)
+                        parameter("ps", pageSize)
+                        parameter("order", "desc")
+                        header(HttpHeaders.Cookie, cookie)
+                    }
+                    
+                    val body: BiliResponse<FollowingsData> = response.body()
+                    if (body.code == 0) {
+                        val users = body.data?.list ?: emptyList()
+                        users.filter { it.uname == "账号已注销" }.map { it.toBiliUser() }
+                    } else emptyList()
+                } catch (_: Exception) { emptyList() }
+            }
+        }
+        
+        // 等待所有结果
+        jobs.forEach { deferred ->
+            deletedUsers.addAll(deferred.await())
+        }
+        
+        deletedUsers
     }
 
     override suspend fun getFollowings(

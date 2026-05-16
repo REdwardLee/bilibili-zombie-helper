@@ -8,6 +8,12 @@ interface BiliRepository {
     /** 从 Cookie 获取当前登录用户信息 */
     suspend fun getLoginInfo(): Result<BiliUser>
 
+    /** 通过搜索API快速查找已注销账号（搜索"账号已注销"） */
+    suspend fun searchDeletedFollowings(vmid: Long): Result<List<BiliUser>>
+
+    /** 快速扫描关注列表中的已注销账号（通过昵称判断） */
+    suspend fun scanDeletedFollowings(vmid: Long): Result<List<BiliUser>>
+
     /** 获取关注列表 */
     suspend fun getFollowings(vmid: Long, page: Int = 1, pageSize: Int = 50): Result<List<BiliUser>>
 

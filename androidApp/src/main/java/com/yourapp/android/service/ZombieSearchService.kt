@@ -137,6 +137,37 @@ class ZombieSearchService : Service() {
                 }
             } catch (_: Exception) { }
 
+            // 先通过搜索API快速查找已注销账号
+            val deletedUsers = mutableListOf<BiliUser>()
+            try {
+                _serviceProgress.value = "正在搜索已注销账号..."
+                updateNotification("正在搜索僵尸UP", "正在搜索已注销账号...", 0, totalCount.coerceAtLeast(1))
+                
+                repo.searchDeletedFollowings(uid).fold(
+                    onSuccess = { list ->
+                        deletedUsers.addAll(list)
+                        // 将已注销账号加入结果（timestamp=0表示已注销）
+                        for (user in list) {
+                            val existing = allResults.indexOfFirst { it.first.mid == user.mid }
+                            if (existing < 0) {
+                                allResults.add(user to 0L)
+                            }
+                        }
+                        // 保存结果
+                        val sorted = allResults.sortedBy { it.second }
+                        saveFollowingResults(storage, sorted)
+                        
+                        val progressText = "已找到 ${deletedUsers.size} 个已注销账号"
+                        _serviceProgress.value = progressText
+                        updateNotification("正在搜索僵尸UP", progressText, deletedUsers.size, totalCount.coerceAtLeast(1))
+                        android.util.Log.d("ZombieSearch", "搜索完成，找到 ${deletedUsers.size} 个已注销账号")
+                    },
+                    onFailure = {
+                        android.util.Log.e("ZombieSearch", "搜索已注销账号失败: ${it.message}")
+                    }
+                )
+            } catch (_: Exception) { }
+
             // 计算总页数
             val totalPages = if (totalCount > 0) (totalCount + pageSize - 1) / pageSize else 1
             android.util.Log.d("ZombieSearch", "totalCount=$totalCount, totalPages=$totalPages")

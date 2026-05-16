@@ -114,11 +114,23 @@ class AppViewModel(context: Context) : ViewModel() {
     )
     val debugFeatures: StateFlow<Set<DebugFeature>> = _debugFeatures.asStateFlow()
 
+    fun reorderDebugFeatures(fromIndex: Int, toIndex: Int) {
+        val current = _debugFeatures.value.toList()
+        if (fromIndex in current.indices && toIndex in current.indices) {
+            val mutable = current.toMutableList()
+            val item = mutable.removeAt(fromIndex)
+            mutable.add(toIndex, item)
+            _debugFeatures.value = mutable.toSet()
+        }
+    }
+
     fun addDebugFeature(feature: DebugFeature) {
-        _debugFeatures.value = _debugFeatures.value + feature
+        // 新添加的功能排在最前面
+        _debugFeatures.value = setOf(feature) + _debugFeatures.value
     }
 
     fun removeDebugFeature(feature: DebugFeature) {
+        // 移除的功能在可用列表里显示在最前面（通过重新创建集合顺序）
         _debugFeatures.value = _debugFeatures.value - feature
     }
 

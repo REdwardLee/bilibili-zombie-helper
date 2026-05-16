@@ -14,17 +14,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /** 调试功能枚举 */
 enum class DebugFeature(val label: String, val icon: String) {
-    BATCH_CALIBRATE("全校准", "🔧"),
-    CALIBRATE_VISIBLE("校准当前可见", "👁"),
+    SHOW_UID("显示UID", "🆔"),
+    BATCH_CALIBRATE("全部校准关注状态", "🔧"),
+    CALIBRATE_VISIBLE("校准可见关注状态", "👁"),
     CLEAR_ZOMBIE("清空僵尸UP", "🗑"),
     CLEAR_ZOMBIE_FOLLOWERS("清空僵尸粉", "🗑"),
     CLEAR_LOGS("清除日志", "📝"),
     SAVE_LOGS("保存日志", "💾"),
-    OPEN_LOG_DIR("打开日志目录", "📁"),
-    SHOW_UID("显示UID", "🆔");
+    OPEN_LOG_DIR("打开日志目录", "📁");
 
     companion object {
-        val ALL = listOf(BATCH_CALIBRATE, CALIBRATE_VISIBLE, CLEAR_ZOMBIE, CLEAR_ZOMBIE_FOLLOWERS, CLEAR_LOGS, SAVE_LOGS, OPEN_LOG_DIR, SHOW_UID)
+        val ALL = listOf(SHOW_UID, BATCH_CALIBRATE, CALIBRATE_VISIBLE, CLEAR_ZOMBIE, CLEAR_ZOMBIE_FOLLOWERS, CLEAR_LOGS, SAVE_LOGS, OPEN_LOG_DIR)
     }
 }
 

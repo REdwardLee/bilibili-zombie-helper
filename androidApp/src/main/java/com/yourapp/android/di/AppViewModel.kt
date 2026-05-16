@@ -97,6 +97,10 @@ class AppViewModel(context: Context) : ViewModel() {
     fun clearFollowingSearchCompleted() { _followingSearchCompleted.value = false }
     fun clearFollowerSearchCompleted() { _followerSearchCompleted.value = false }
 
+    // 关注状态覆盖（用于全校准后更新UI）
+    private val _followStatusOverrides = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val followStatusOverrides: StateFlow<Map<Long, Int>> = _followStatusOverrides.asStateFlow()
+    
     // 调试功能列表
     private val _debugFeatures = MutableStateFlow<Set<DebugFeature>>(
         setOf(

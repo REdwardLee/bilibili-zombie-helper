@@ -289,7 +289,7 @@ fun MainContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "请开启通知权限，否则后台搜索会被系统杀死",
+                            "打开通知后可以查看工作进度哟～",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -377,6 +377,10 @@ fun MainContent(
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
+
+            // 调试功能状态
+            val enabledFeatures by vm.debugFeatures.collectAsStateWithLifecycle()
+            val showUid = DebugFeature.SHOW_UID in enabledFeatures
             if (isRecheckingFailed) {
                 Text(
                     recheckProgress,
@@ -394,6 +398,7 @@ fun MainContent(
                             ZombieFollowingList(
                                 users = zombieFollowings,
                                 vm = vm,
+                                showUid = showUid,
                                 onNameClick = { mid -> vm.onUpNameClicked(mid) }
                             )
                         }
@@ -405,6 +410,7 @@ fun MainContent(
                         else -> UserList(
                             users = followings,
                             hasMore = hasMoreFollowings,
+                            showUid = showUid,
                             onLoadMore = { vm.loadFollowings(loadMore = true) },
                             onToggleFollow = { user, isFollowing ->
                                 vm.toggleFollow(user, isFollowing)
@@ -416,7 +422,8 @@ fun MainContent(
                         showZombieFollowerView && zombieFollowers.isNotEmpty() -> {
                             ZombieFollowerList(
                                 users = zombieFollowers,
-                                vm = vm
+                                vm = vm,
+                                showUid = showUid
                             )
                         }
                         showZombieFollowerView && zombieFollowers.isEmpty() && !isSearchingFollowers -> {
@@ -427,6 +434,7 @@ fun MainContent(
                         else -> UserList(
                             users = followers,
                             hasMore = hasMoreFollowers,
+                            showUid = showUid,
                             onLoadMore = { vm.loadFollowers(loadMore = true) },
                             onToggleFollow = { user, isFollowing ->
                                 vm.toggleFollow(user, isFollowing)
@@ -824,7 +832,7 @@ fun MainContent(
 }
 
 @Composable
-fun UserCard(user: BiliUser) {
+fun UserCard(user: BiliUser, showUid: Boolean = false) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(
@@ -838,8 +846,17 @@ fun UserCard(user: BiliUser) {
             }
             Spacer(Modifier.width(16.dp))
             Column {
-                Text(user.uname, style = MaterialTheme.typography.titleMedium)
-                Text("UID: ${user.mid}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = user.uname,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (showUid) {
+                    Text(
+                        text = "ID: ${user.mid}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
                 if (user.sign.isNotBlank()) {
                     Text(user.sign, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
@@ -852,6 +869,7 @@ fun UserCard(user: BiliUser) {
 fun UserList(
     users: List<BiliUser>,
     hasMore: Boolean,
+    showUid: Boolean = false,
     onLoadMore: () -> Unit,
     onToggleFollow: (BiliUser, Boolean) -> Unit = { _, _ -> },
     onNameClick: (Long) -> Unit = {}
@@ -878,7 +896,7 @@ fun UserList(
         modifier = Modifier.fillMaxSize()
     ) {
         items(users, key = { it.mid }) { user ->
-            UserListItem(user, onToggleFollow = onToggleFollow, onNameClick = onNameClick)
+            UserListItem(user, showUid = showUid, onToggleFollow = onToggleFollow, onNameClick = onNameClick)
         }
     }
 }
@@ -886,6 +904,7 @@ fun UserList(
 @Composable
 fun UserListItem(
     user: BiliUser,
+    showUid: Boolean = false,
     onToggleFollow: (BiliUser, Boolean) -> Unit = { _, _ -> },
     onNameClick: (Long) -> Unit = {}
 ) {
@@ -917,8 +936,17 @@ fun UserListItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(user.uname, style = MaterialTheme.typography.titleMedium)
-                Text("UID: ${user.mid}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    text = user.uname,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (showUid) {
+                    Text(
+                        text = "ID: ${user.mid}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
                 if (user.sign.isNotBlank()) {
                     Text(user.sign, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
@@ -937,6 +965,7 @@ fun UserListItem(
 fun ZombieFollowingList(
     users: List<Pair<BiliUser, Long>>,
     vm: AppViewModel,
+    showUid: Boolean = false,
     onNameClick: (Long) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -982,8 +1011,11 @@ fun ZombieFollowingList(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(user.uname, style = MaterialTheme.typography.titleMedium)
-                        Text("UID: ${user.mid} | 最后更新: $date ($daysAgo)", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text = if (showUid) "${user.uname}  ${user.mid}" else user.uname,
+                            style = if (showUid) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium
+                        )
+                        Text("最后更新: $date ($daysAgo)", style = MaterialTheme.typography.bodySmall)
                         if (user.sign.isNotBlank()) {
                             Text(user.sign, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                         }
@@ -1003,7 +1035,8 @@ fun ZombieFollowingList(
 @Composable
 fun ZombieFollowerList(
     users: List<BiliUser>,
-    vm: AppViewModel
+    vm: AppViewModel,
+    showUid: Boolean = false
 ) {
     val context = LocalContext.current
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -1026,8 +1059,10 @@ fun ZombieFollowerList(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(user.uname, style = MaterialTheme.typography.titleMedium)
-                        Text("UID: ${user.mid}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text = if (showUid) "${user.uname}  ${user.mid}" else user.uname,
+                            style = if (showUid) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium
+                        )
                         if (isDefault) {
                             Text(
                                 "疑似小号/默认账号",

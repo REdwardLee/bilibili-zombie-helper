@@ -73,22 +73,52 @@ class ZombieSearchService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_FOLLOWING -> {
-                val cookie = intent.getStringExtra(EXTRA_COOKIE) ?: return START_NOT_STICKY
+                val cookie = intent.getStringExtra(EXTRA_COOKIE)
                 val uid = intent.getLongExtra(EXTRA_UID, 0L)
-                if (uid == 0L) return START_NOT_STICKY
-                startFollowingSearch(cookie, uid)
+                
+                // 如果没有传参数，从存储中读取
+                val (actualCookie, actualUid) = if (cookie == null || uid == 0L) {
+                    readCredentialsFromStorage()
+                } else {
+                    cookie to uid
+                }
+                
+                if (actualCookie.isBlank() || actualUid == 0L) return START_STICKY
+                startFollowingSearch(actualCookie, actualUid)
             }
             ACTION_START_FOLLOWER -> {
-                val cookie = intent.getStringExtra(EXTRA_COOKIE) ?: return START_NOT_STICKY
+                val cookie = intent.getStringExtra(EXTRA_COOKIE)
                 val uid = intent.getLongExtra(EXTRA_UID, 0L)
-                if (uid == 0L) return START_NOT_STICKY
-                startFollowerSearch(cookie, uid)
+                
+                val (actualCookie, actualUid) = if (cookie == null || uid == 0L) {
+                    readCredentialsFromStorage()
+                } else {
+                    cookie to uid
+                }
+                
+                if (actualCookie.isBlank() || actualUid == 0L) return START_STICKY
+                startFollowerSearch(actualCookie, actualUid)
             }
             ACTION_STOP -> {
                 stopSearch()
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
+    }
+
+    private fun readCredentialsFromStorage(): Pair<String, Long> {
+        val storage = AndroidSettingsStorage(applicationContext)
+        val cookie = runBlocking { storage.getString(com.yourapp.data.StorageKeys.BILI_FULL_COOKIE, "") }
+        val uid = runBlocking { 
+            try {
+                val userJson = storage.getString("bili_user", "")
+                if (userJson.isNotBlank()) {
+                    val user = Json { ignoreUnknownKeys = true }.decodeFromString(BiliUser.serializer(), userJson)
+                    user.mid
+                } else 0L
+            } catch (_: Exception) { 0L }
+        }
+        return cookie to uid
     }
 
     private fun getDelayForCount(count: Int): Long {
@@ -106,7 +136,23 @@ class ZombieSearchService : Service() {
         _serviceEta.value = ""
 
         val notification = buildNotification("正在搜索僵尸UP...", "准备中", 0, 0)
-        startForeground(NOTIFICATION_ID, notification)
+        // startForeground(NOTIFICATION_ID, notification)
+
+        // 启动心跳：每秒更新通知，保持 Service 活着
+        val heartbeatJob = serviceScope.launch {
+            var heartbeatCount = 0
+            while (isActive && _serviceRunning.value) {
+                delay(1000)
+                heartbeatCount++
+                // 每 5 秒更新一次通知（避免太频繁）
+                if (heartbeatCount % 5 == 0) {
+                    val progressText = _serviceProgress.value
+                    if (progressText.isNotBlank()) {
+                        updateNotification("正在搜索僵尸UP", progressText, 0, 100)
+                    }
+                }
+            }
+        }
 
         searchJob = serviceScope.launch {
             val storage = AndroidSettingsStorage(applicationContext)
@@ -283,8 +329,9 @@ class ZombieSearchService : Service() {
             updateNotification("搜索完成", finalText, 100, 100)
             sendCompleteBroadcast(1, allResults.size)
 
-            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            // stopForeground(Service.STOP_FOREGROUND_REMOVE)
             _serviceRunning.value = false
+            heartbeatJob.cancel()
         }
     }
 
@@ -293,7 +340,7 @@ class ZombieSearchService : Service() {
         _serviceRunning.value = true
 
         val notification = buildNotification("正在搜索僵尸粉...", "准备中", 0, 0)
-        startForeground(NOTIFICATION_ID, notification)
+        // startForeground(NOTIFICATION_ID, notification)
 
         searchJob = serviceScope.launch {
             val storage = AndroidSettingsStorage(applicationContext)
@@ -381,7 +428,7 @@ class ZombieSearchService : Service() {
             updateNotification("搜索完成", finalText, 100, 100)
             sendCompleteBroadcast(2, allResults.size)
 
-            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            // stopForeground(Service.STOP_FOREGROUND_REMOVE)
             _serviceRunning.value = false
         }
     }
@@ -392,7 +439,7 @@ class ZombieSearchService : Service() {
         _serviceRunning.value = false
         _serviceProgress.value = "已停止"
         _serviceEta.value = ""
-        stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        // stopForeground(Service.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
@@ -514,6 +561,14 @@ class ZombieSearchService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val startIntent = Intent(this, ZombieSearchService::class.java).apply {
+            action = ACTION_START_FOLLOWING
+        }
+        val startPendingIntent = PendingIntent.getService(
+            this, 1, startIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
@@ -521,6 +576,7 @@ class ZombieSearchService : Service() {
             .setContentIntent(openPendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .addAction(android.R.drawable.ic_media_play, "开始搜索", startPendingIntent)
             .addAction(android.R.drawable.ic_media_pause, "停止", stopPendingIntent)
             .apply {
                 if (max > 0) {

@@ -72,6 +72,8 @@ fun AppUI(
     val loading by vm.loading.collectAsStateWithLifecycle()
 
     // 动态轮询通知权限（每秒检测一次，直到授权后自动消失）
+    /* 注释掉通知权限检测 - 不需要通知
+    /* 注释掉通知权限检测 - 不需要通知
     var hasNotificationPermission by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -80,6 +82,8 @@ fun AppUI(
             delay(1000)
         }
     }
+    */
+    */
 
     val loginLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -201,7 +205,7 @@ fun AppUI(
             MainContent(
                 vm = vm,
                 padding = padding,
-                hasNotificationPermission = hasNotificationPermission,
+                hasNotificationPermission = true, // 不需要通知权限
                 serviceProgress = serviceProgress,
                 serviceEta = serviceEta,
                 serviceRunning = serviceRunning
@@ -272,7 +276,7 @@ fun MainContent(
     ) {
         Column(Modifier.fillMaxSize()) {
             // 通知权限提示
-            if (!hasNotificationPermission) {
+            if (false) { // 注释掉通知权限提示
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()

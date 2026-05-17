@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -443,7 +444,8 @@ fun MainContent(
                             onToggleFollow = { user, isFollowing ->
                                 vm.toggleFollow(user, isFollowing)
                             },
-                            onNameClick = { mid -> vm.onUpNameClicked(mid) }
+                            onNameClick = { mid -> vm.onUpNameClicked(mid) },
+                            onRemoveFollower = { mid -> vm.removeFollower(mid) }
                         )
                     }
                 }
@@ -876,7 +878,8 @@ fun UserList(
     showUid: Boolean = false,
     onLoadMore: () -> Unit,
     onToggleFollow: (BiliUser, Boolean) -> Unit = { _, _ -> },
-    onNameClick: (Long) -> Unit = {}
+    onNameClick: (Long) -> Unit = {},
+    onRemoveFollower: ((Long) -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
 
@@ -900,7 +903,7 @@ fun UserList(
         modifier = Modifier.fillMaxSize()
     ) {
         items(users, key = { it.mid }) { user ->
-            UserListItem(user, showUid = showUid, onToggleFollow = onToggleFollow, onNameClick = onNameClick)
+            UserListItem(user, showUid = showUid, onToggleFollow = onToggleFollow, onNameClick = onNameClick, onRemoveFollower = onRemoveFollower)
         }
     }
 }
@@ -910,17 +913,20 @@ fun UserListItem(
     user: BiliUser,
     showUid: Boolean = false,
     onToggleFollow: (BiliUser, Boolean) -> Unit = { _, _ -> },
-    onNameClick: (Long) -> Unit = {}
+    onNameClick: (Long) -> Unit = {},
+    onRemoveFollower: ((Long) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isFollowing = user.attribute >= 2
+    val isFollowerScene = onRemoveFollower != null
     val status = when (user.attribute) {
-        0 -> "未关注" to MaterialTheme.colorScheme.error
-        2 -> "已关注" to MaterialTheme.colorScheme.primary
+        0 -> if (isFollowerScene) "回关" to MaterialTheme.colorScheme.primary else "未关注" to MaterialTheme.colorScheme.error
+        2 -> if (isFollowerScene) "已回关" to MaterialTheme.colorScheme.primary else "已关注" to MaterialTheme.colorScheme.primary
         6 -> "互相关注" to MaterialTheme.colorScheme.tertiary
         else -> "未知" to MaterialTheme.colorScheme.onSurface
     }
     val btnColor: androidx.compose.ui.graphics.Color = if (isFollowing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    var showMenu by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -955,13 +961,56 @@ fun UserListItem(
                     Text(user.sign, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                 }
             }
-            TextButton(
-                onClick = { onToggleFollow(user, isFollowing) },
-                colors = ButtonDefaults.textButtonColors(contentColor = btnColor)
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(status.first)
+                TextButton(
+                    onClick = { onToggleFollow(user, isFollowing) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = btnColor)
+                ) {
+                    Text(status.first)
+                }
+                // 粉丝列表场景显示 ⋮ 菜单
+                if (onRemoveFollower != null) {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "更多",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
+    }
+    
+    // 底部弹出菜单 - 用 AlertDialog 替代 ModalBottomSheet
+    if (showMenu && onRemoveFollower != null) {
+        AlertDialog(
+            onDismissRequest = { showMenu = false },
+            title = { Text(user.uname) },
+            text = { Text("确定要移除这个粉丝吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveFollower(user.mid)
+                        showMenu = false
+                    }
+                ) {
+                    Text("移除粉丝", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showMenu = false }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 
@@ -1046,6 +1095,8 @@ fun ZombieFollowerList(
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(users, key = { it.mid }) { user ->
             val isDefault = isDefaultUsername(user.uname)
+            var showMenu by remember { mutableStateOf(false) }
+            
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1075,13 +1126,53 @@ fun ZombieFollowerList(
                             )
                         }
                     }
-                    TextButton(
-                        onClick = { vm.toggleFollow(user, user.attribute >= 2) },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("关注")
+                        TextButton(
+                            onClick = { vm.toggleFollow(user, user.attribute >= 2) },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("回关")
+                        }
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "更多",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
+            }
+            
+            // 弹出菜单 - 用 AlertDialog 替代
+            if (showMenu) {
+                AlertDialog(
+                    onDismissRequest = { showMenu = false },
+                    title = { Text(user.uname) },
+                    text = { Text("确定要移除这个粉丝吗？") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                vm.removeFollower(user.mid)
+                                showMenu = false
+                            }
+                        ) {
+                            Text("移除粉丝", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showMenu = false }
+                        ) {
+                            Text("取消")
+                        }
+                    }
+                )
             }
         }
     }

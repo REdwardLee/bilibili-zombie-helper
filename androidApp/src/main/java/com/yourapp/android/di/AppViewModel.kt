@@ -1160,6 +1160,24 @@ class AppViewModel(context: Context) : ViewModel() {
     }
 
     /** 切换关注/取关 */
+    fun removeFollower(mid: Long) {
+        viewModelScope.launch {
+            modifyRelation(mid, 7).fold(
+                onSuccess = {
+                    // 从粉丝列表中移除
+                    _followers.value = _followers.value.filter { it.mid != mid }
+                    // 从僵尸粉列表中移除
+                    _zombieFollowers.value = _zombieFollowers.value.filter { it.mid != mid }
+                    saveZombieData()
+                    _error.value = "已移除粉丝"
+                },
+                onFailure = { err ->
+                    _error.value = "移除粉丝失败: ${err.message}"
+                }
+            )
+        }
+    }
+
     fun toggleFollow(user: BiliUser, isFollowing: Boolean) {
         viewModelScope.launch {
             // 从内存列表重新确认当前真实状态，避免UI竞态导致act错误

@@ -43,6 +43,12 @@ object CrashLogCollector {
         throwable: Throwable,
         extraContext: Map<String, String> = emptyMap()
     ) {
+        // 忽略协程取消异常（这是正常行为，不是崩溃）
+        if (throwable is kotlinx.coroutines.CancellationException) {
+            android.util.Log.d("CrashLogCollector", "Ignoring CancellationException: ${throwable.message}")
+            return
+        }
+        
         try {
             val logFile = getLogFile(context)
             val existingLogs = loadLogs(context)

@@ -73,11 +73,11 @@ fun AppUI(
     val error by vm.error.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
 
-    // 检查上次崩溃日志
+    // 检查上次崩溃日志（不再自动弹窗，改为调试面板按钮）
     val activity = context as? android.app.Activity
     val hasCrashLog = remember { activity?.intent?.getBooleanExtra("has_crash_log", false) ?: false }
     val crashLogContent = remember { activity?.intent?.getStringExtra("last_crash_log") ?: "" }
-    var showCrashLogDialog by remember { mutableStateOf(hasCrashLog) }
+    var showCrashLogDialog by remember { mutableStateOf(false) }
 
     // 崩溃日志显示对话框
     if (showCrashLogDialog && crashLogContent.isNotBlank()) {
@@ -137,28 +137,33 @@ fun AppUI(
                     ) {
                         Text("📋 复制")
                     }
-                    // 打开日志目录按钮
+                    // 打开崩溃日志文件按钮
                     TextButton(
                         onClick = {
-                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                                setDataAndType(
-                                    androidx.core.content.FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        java.io.File(context.filesDir, "bili_crash_logs.json")
-                                    ),
-                                    "application/json"
-                                )
-                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
                             try {
-                                context.startActivity(intent)
+                                val logFile = java.io.File(context.filesDir, "bili_crash_logs.json")
+                                if (logFile.exists()) {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                        setDataAndType(
+                                            androidx.core.content.FileProvider.getUriForFile(
+                                                context,
+                                                "${context.packageName}.fileprovider",
+                                                logFile
+                                            ),
+                                            "application/json"
+                                        )
+                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(intent)
+                                } else {
+                                    android.widget.Toast.makeText(context, "崩溃日志文件不存在", android.widget.Toast.LENGTH_SHORT).show()
+                                }
                             } catch (e: Exception) {
-                                android.widget.Toast.makeText(context, "无法打开日志文件", android.widget.Toast.LENGTH_SHORT).show()
+                                android.widget.Toast.makeText(context, "无法打开日志文件: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
                     ) {
-                        Text("📂 打开")
+                        Text("📂 打开日志")
                     }
                     // 清除日志按钮
                     Button(
@@ -302,7 +307,9 @@ fun AppUI(
                 hasNotificationPermission = true, // 不需要通知权限
                 serviceProgress = serviceProgress,
                 serviceEta = serviceEta,
-                serviceRunning = serviceRunning
+                serviceRunning = serviceRunning,
+                hasCrashLog = hasCrashLog,
+                onShowCrashLog = { showCrashLogDialog = true }
             )
         }
     }
@@ -337,7 +344,9 @@ fun MainContent(
     hasNotificationPermission: Boolean,
     serviceProgress: String,
     serviceEta: String,
-    serviceRunning: Boolean
+    serviceRunning: Boolean,
+    hasCrashLog: Boolean = false,
+    onShowCrashLog: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val followings by vm.followings.collectAsStateWithLifecycle()
@@ -767,9 +776,22 @@ fun MainContent(
                                     val intent = vm.openHtmlDirectory()
                                     if (intent != null) context.startActivity(intent)
                                 },
-                                label = { Text("📁 日志目录", style = MaterialTheme.typography.labelSmall) },
+                                label = { Text("📁 HTML目录", style = MaterialTheme.typography.labelSmall) },
                                 colors = AssistChipDefaults.assistChipColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                )
+                            )
+                        }
+                    }
+
+                    // 查看崩溃日志按钮
+                    if (hasCrashLog) {
+                        featureButtons.add {
+                            AssistChip(
+                                onClick = onShowCrashLog,
+                                label = { Text("⚠️ 崩溃日志", style = MaterialTheme.typography.labelSmall) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
                                 )
                             )
                         }

@@ -48,6 +48,10 @@ import kotlinx.coroutines.delay
 
 import com.yourapp.android.service.ZombieSearchService
 import com.yourapp.android.util.CrashLogCollector
+import com.yourapp.android.service.SearchConfig
+import com.yourapp.data.AndroidSettingsStorage
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import com.yourapp.android.ui.WebViewLoginActivity
 
 import android.content.Intent
@@ -809,6 +813,26 @@ fun MainContent(
                         }
                     }
 
+                    // 搜索配置按钮
+                    if (BuildConfig.DEBUG) {
+                        featureButtons.add {
+                            var showSearchConfig by remember { mutableStateOf(false) }
+                            AssistChip(
+                                onClick = { showSearchConfig = true },
+                                label = { Text("⚙️ 搜索配置", style = MaterialTheme.typography.labelSmall) },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                )
+                            )
+                            if (showSearchConfig) {
+                                SearchConfigDialog(
+                                    onDismiss = { showSearchConfig = false },
+                                    context = context
+                                )
+                            }
+                        }
+                    }
+
                     if (DebugFeature.CLEAR_LOGS in enabledFeatures) {
                         featureButtons.add {
                             AssistChip(
@@ -950,6 +974,143 @@ fun MainContent(
             )
         }
     }
+}
+
+@Composable
+fun SearchConfigDialog(
+    onDismiss: () -> Unit,
+    context: android.content.Context
+) {
+    val storage = remember { AndroidSettingsStorage(context) }
+    val scope = rememberCoroutineScope()
+
+    var config by remember {
+        mutableStateOf(
+            runBlocking {
+                val json = storage.getString(com.yourapp.data.StorageKeys.SEARCH_CONFIG, "")
+                if (json.isNotBlank()) SearchConfig.fromJson(json) else SearchConfig.DEFAULT
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("⚙️ 搜索参数配置") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    "延迟档位 (getDelayForCount)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                ConfigField("档位1 最大数量") { config = config.copy(tier1MaxCount = it.toIntOrNull() ?: config.tier1MaxCount) }
+                ConfigField("档位1 基础延迟(ms)") { config = config.copy(tier1BaseDelay = it.toLongOrNull() ?: config.tier1BaseDelay) }
+                ConfigField("档位1 随机延迟(ms)") { config = config.copy(tier1RandomDelay = it.toLongOrNull() ?: config.tier1RandomDelay) }
+                ConfigField("档位2 最大数量") { config = config.copy(tier2MaxCount = it.toIntOrNull() ?: config.tier2MaxCount) }
+                ConfigField("档位2 基础延迟(ms)") { config = config.copy(tier2BaseDelay = it.toLongOrNull() ?: config.tier2BaseDelay) }
+                ConfigField("档位2 随机延迟(ms)") { config = config.copy(tier2RandomDelay = it.toLongOrNull() ?: config.tier2RandomDelay) }
+                ConfigField("档位3 最大数量") { config = config.copy(tier3MaxCount = it.toIntOrNull() ?: config.tier3MaxCount) }
+                ConfigField("档位3 基础延迟(ms)") { config = config.copy(tier3BaseDelay = it.toLongOrNull() ?: config.tier3BaseDelay) }
+                ConfigField("档位3 随机延迟(ms)") { config = config.copy(tier3RandomDelay = it.toLongOrNull() ?: config.tier3RandomDelay) }
+                ConfigField("档位4 基础延迟(ms)") { config = config.copy(tier4BaseDelay = it.toLongOrNull() ?: config.tier4BaseDelay) }
+                ConfigField("档位4 随机延迟(ms)") { config = config.copy(tier4RandomDelay = it.toLongOrNull() ?: config.tier4RandomDelay) }
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text(
+                    "重试延迟",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                ConfigField("重试基础延迟(ms)") { config = config.copy(retryBaseDelay = it.toLongOrNull() ?: config.retryBaseDelay) }
+                ConfigField("重试随机范围(ms)") { config = config.copy(retryRandomDelay = it.toLongOrNull() ?: config.retryRandomDelay) }
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text(
+                    "ETA 计算",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                ConfigField("API 预估耗时(ms)") { config = config.copy(apiEstimateTimeMs = it.toLongOrNull() ?: config.apiEstimateTimeMs) }
+                ConfigField("ETA段1 平均总耗时(ms)") { config = config.copy(etaSegment1AvgTotal = it.toLongOrNull() ?: config.etaSegment1AvgTotal) }
+                ConfigField("ETA段2 平均总耗时(ms)") { config = config.copy(etaSegment2AvgTotal = it.toLongOrNull() ?: config.etaSegment2AvgTotal) }
+                ConfigField("ETA段3 平均总耗时(ms)") { config = config.copy(etaSegment3AvgTotal = it.toLongOrNull() ?: config.etaSegment3AvgTotal) }
+                ConfigField("ETA段4 平均总耗时(ms)") { config = config.copy(etaSegment4AvgTotal = it.toLongOrNull() ?: config.etaSegment4AvgTotal) }
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text(
+                    "分页",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                ConfigField("页大小") { config = config.copy(pageSize = it.toIntOrNull() ?: config.pageSize) }
+            }
+        },
+        confirmButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(
+                    onClick = {
+                        config = SearchConfig.DEFAULT
+                        scope.launch {
+                            storage.putString(com.yourapp.data.StorageKeys.SEARCH_CONFIG, "")
+                        }
+                        android.widget.Toast.makeText(context, "已恢复默认配置", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("恢复默认")
+                }
+                Button(
+                    onClick = {
+                        scope.launch {
+                            storage.putString(com.yourapp.data.StorageKeys.SEARCH_CONFIG, config.toJson())
+                        }
+                        android.widget.Toast.makeText(context, "配置已保存，下次搜索生效", android.widget.Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }
+                ) {
+                    Text("保存")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ConfigField(label: String, onValueChange: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    OutlinedTextField(
+        value = text,
+        onValueChange = {
+            text = it
+            onValueChange(it)
+        },
+        label = { Text(label) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        singleLine = true,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+        )
+    )
 }
 
 @Composable

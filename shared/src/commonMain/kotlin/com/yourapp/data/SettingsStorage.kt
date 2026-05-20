@@ -26,4 +26,6 @@ object StorageKeys {
     const val ZOMBIE_FOLLOWING_LAST_INDEX = "zombie_following_last_index"
     const val ZOMBIE_FOLLOWER_LAST_PAGE = "zombie_follower_last_page"
     const val ZOMBIE_FOLLOWER_LAST_INDEX = "zombie_follower_last_index"
+    // 搜索配置
+    const val SEARCH_CONFIG = "search_config"
 }

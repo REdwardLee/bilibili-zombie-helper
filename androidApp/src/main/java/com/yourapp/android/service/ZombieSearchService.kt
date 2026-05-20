@@ -123,12 +123,25 @@ class ZombieSearchService : Service() {
         return cookie to uid
     }
 
+    private fun getSearchConfig(): SearchConfig {
+        val storage = AndroidSettingsStorage(applicationContext)
+        val json = runBlocking { 
+            storage.getString(com.yourapp.data.StorageKeys.SEARCH_CONFIG, "") 
+        }
+        return if (json.isNotBlank()) {
+            SearchConfig.fromJson(json)
+        } else {
+            SearchConfig.DEFAULT
+        }
+    }
+
     private fun getDelayForCount(count: Int): Long {
+        val config = getSearchConfig()
         return when {
-            count <= 20 -> 100L + Random.nextLong(0, 200)
-            count <= 40 -> 500L + Random.nextLong(0, 1000)
-            count <= 60 -> 1000L + Random.nextLong(0, 2000)
-            else -> 3000L + Random.nextLong(0, 2000)
+            count <= config.tier1MaxCount -> config.tier1BaseDelay + Random.nextLong(0, config.tier1RandomDelay)
+            count <= config.tier2MaxCount -> config.tier2BaseDelay + Random.nextLong(0, config.tier2RandomDelay)
+            count <= config.tier3MaxCount -> config.tier3BaseDelay + Random.nextLong(0, config.tier3RandomDelay)
+            else -> config.tier4BaseDelay + Random.nextLong(0, config.tier4RandomDelay)
         }
     }
 
@@ -170,8 +183,9 @@ class ZombieSearchService : Service() {
                     onFailure = { totalCount = 0 }
                 )
 
+                val config = getSearchConfig()
                 val allResults = mutableListOf<Pair<BiliUser, Long>>()
-                val pageSize = 50
+                val pageSize = config.pageSize
                 var hasMore = true
                 var totalChecked = 0
                 var sessionChecked = 0
@@ -273,7 +287,7 @@ class ZombieSearchService : Service() {
                         var retries = 0
                         while (!success && isActive) {
                             val delayMs = if (retries > 0) {
-                                60000L + Random.nextLong(0, 30000)
+                                config.retryBaseDelay + Random.nextLong(0, config.retryRandomDelay)
                             } else {
                                 getDelayForCount(sessionChecked)
                             }
@@ -386,7 +400,8 @@ class ZombieSearchService : Service() {
 
             val allResults = mutableListOf<BiliUser>()
             var page = 1
-            val pageSize = 50
+            val config = getSearchConfig()
+            val pageSize = config.pageSize
             var hasMore = true
             var totalChecked = 0
 
@@ -489,28 +504,33 @@ class ZombieSearchService : Service() {
 
     /** 基于分段延迟理论值计算剩余时间 */
     private fun estimateRemainingTime(sessionChecked: Int, totalCount: Int): Long {
+        val config = getSearchConfig()
         var remaining = totalCount - sessionChecked
         if (remaining <= 0) return 0
 
         var currentIdx = sessionChecked
         var totalMs = 0L
-        val apiTimeMs = 500L // API请求+处理约500ms
 
-        // 段定义：(起始, 结束, 平均总耗时=延迟+API)
+        // 段定义：(结束, 平均总耗时=延迟+API)
         val segments = listOf(
-            Triple(0, 20, 200L + apiTimeMs),      // 0-19: 延迟平均200ms
-            Triple(20, 40, 1000L + apiTimeMs),     // 20-39: 延迟平均1000ms
-            Triple(40, 60, 2000L + apiTimeMs),     // 40-59: 延迟平均2000ms
-            Triple(60, Int.MAX_VALUE, 4000L + apiTimeMs) // 60+: 延迟平均4000ms
+            Pair(config.tier1MaxCount, config.etaSegment1AvgTotal),
+            Pair(config.tier2MaxCount, config.etaSegment2AvgTotal),
+            Pair(config.tier3MaxCount, config.etaSegment3AvgTotal),
+            Pair(Int.MAX_VALUE, config.etaSegment4AvgTotal)
         )
 
-        for ((start, end, avgTotal) in segments) {
-            if (currentIdx >= end) continue
+        var lastEnd = 0
+        for ((end, avgTotal) in segments) {
+            if (currentIdx >= end) {
+                lastEnd = end
+                continue
+            }
 
             val countInSegment = minOf(end - currentIdx, remaining)
             totalMs += countInSegment * avgTotal
             remaining -= countInSegment
             currentIdx += countInSegment
+            lastEnd = end
 
             if (remaining <= 0) break
         }

@@ -47,6 +47,7 @@ import com.yourapp.domain.BiliUser
 import kotlinx.coroutines.delay
 
 import com.yourapp.android.service.ZombieSearchService
+import com.yourapp.android.util.CrashLogCollector
 import com.yourapp.android.ui.WebViewLoginActivity
 
 import android.content.Intent
@@ -72,19 +73,111 @@ fun AppUI(
     val error by vm.error.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
 
-    // 动态轮询通知权限（每秒检测一次，直到授权后自动消失）
-    /* 注释掉通知权限检测 - 不需要通知
-    /* 注释掉通知权限检测 - 不需要通知
-    var hasNotificationPermission by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val nm = context.getSystemService(android.app.NotificationManager::class.java)
-            hasNotificationPermission = nm.areNotificationsEnabled()
-            delay(1000)
-        }
+    // 检查上次崩溃日志
+    val activity = context as? android.app.Activity
+    val hasCrashLog = remember { activity?.intent?.getBooleanExtra("has_crash_log", false) ?: false }
+    val crashLogContent = remember { activity?.intent?.getStringExtra("last_crash_log") ?: "" }
+    var showCrashLogDialog by remember { mutableStateOf(hasCrashLog) }
+
+    // 崩溃日志显示对话框
+    if (showCrashLogDialog && crashLogContent.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { showCrashLogDialog = false },
+            title = { 
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("上次崩溃记录")
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "应用上次运行时发生了崩溃，以下是崩溃信息：",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .verticalScroll(rememberScrollState())
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            crashLogContent,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 复制到剪贴板按钮
+                    TextButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("崩溃日志", crashLogContent)
+                            clipboard.setPrimaryClip(clip)
+                            // 显示提示
+                            android.widget.Toast.makeText(context, "崩溃日志已复制到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("📋 复制")
+                    }
+                    // 打开日志目录按钮
+                    TextButton(
+                        onClick = {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                setDataAndType(
+                                    androidx.core.content.FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        java.io.File(context.filesDir, "bili_crash_logs.json")
+                                    ),
+                                    "application/json"
+                                )
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "无法打开日志文件", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Text("📂 打开")
+                    }
+                    // 清除日志按钮
+                    Button(
+                        onClick = { 
+                            CrashLogCollector.clearLogs(context)
+                            showCrashLogDialog = false 
+                        }
+                    ) {
+                        Text("清除")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCrashLogDialog = false }) {
+                    Text("关闭")
+                }
+            }
+        )
     }
-    */
-    */
 
     val loginLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()

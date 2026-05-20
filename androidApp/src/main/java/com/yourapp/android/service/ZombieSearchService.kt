@@ -22,6 +22,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
 
+import com.yourapp.android.util.CrashLogCollector
+
 class ZombieSearchService : Service() {
 
     companion object {
@@ -136,7 +138,7 @@ class ZombieSearchService : Service() {
         _serviceEta.value = ""
 
         val notification = buildNotification("正在搜索僵尸UP...", "准备中", 0, 0)
-        // startForeground(NOTIFICATION_ID, notification)
+        startForeground(NOTIFICATION_ID, notification)
 
         // 启动心跳：每秒更新通知，保持 Service 活着
         val heartbeatJob = serviceScope.launch {
@@ -160,178 +162,206 @@ class ZombieSearchService : Service() {
             val getFollowings = com.yourapp.usecases.GetFollowingsUseCase(repo)
             val getUserLastUpdateTime = com.yourapp.usecases.GetUserLastUpdateTimeUseCase(repo)
 
-            // 获取关注总数
-            var totalCount = 0
-            repo.getFollowingsTotal(uid).fold(
-                onSuccess = { totalCount = it },
-                onFailure = { totalCount = 0 }
-            )
-
-            val allResults = mutableListOf<Pair<BiliUser, Long>>()
-            val pageSize = 50
-            var hasMore = true
-            var totalChecked = 0
-            var sessionChecked = 0
-
-            // 恢复已有结果
             try {
-                val followingJson = storage.getString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWINGS, "")
-                if (followingJson.isNotBlank()) {
-                    val snapshot = saveJson.decodeFromString(ZombieFollowingSnapshot.serializer(), followingJson)
-                    allResults.addAll(snapshot.items.map { it.user to it.timestamp })
-                    totalChecked = allResults.size
-                }
-            } catch (_: Exception) { }
+                // 获取关注总数
+                var totalCount = 0
+                repo.getFollowingsTotal(uid).fold(
+                    onSuccess = { totalCount = it },
+                    onFailure = { totalCount = 0 }
+                )
 
-            // 先通过搜索API快速查找已注销账号
-            val deletedUsers = mutableListOf<BiliUser>()
-            try {
-                _serviceProgress.value = "正在搜索已注销账号..."
-                updateNotification("正在搜索僵尸UP", "正在搜索已注销账号...", 0, totalCount.coerceAtLeast(1))
-                
-                repo.searchDeletedFollowings(uid).fold(
-                    onSuccess = { list ->
-                        deletedUsers.addAll(list)
-                        // 将已注销账号加入结果（timestamp=0表示已注销）
-                        for (user in list) {
-                            val existing = allResults.indexOfFirst { it.first.mid == user.mid }
-                            if (existing < 0) {
-                                allResults.add(user to 0L)
-                            }
-                        }
-                        // 保存结果
-                        val sorted = allResults.sortedBy { it.second }
-                        saveFollowingResults(storage, sorted)
-                        
-                        val progressText = "已找到 ${deletedUsers.size} 个已注销账号"
-                        _serviceProgress.value = progressText
-                        updateNotification("正在搜索僵尸UP", progressText, deletedUsers.size, totalCount.coerceAtLeast(1))
-                        android.util.Log.d("ZombieSearch", "搜索完成，找到 ${deletedUsers.size} 个已注销账号")
-                    },
-                    onFailure = {
-                        android.util.Log.e("ZombieSearch", "搜索已注销账号失败: ${it.message}")
+                val allResults = mutableListOf<Pair<BiliUser, Long>>()
+                val pageSize = 50
+                var hasMore = true
+                var totalChecked = 0
+                var sessionChecked = 0
+
+                // 恢复已有结果
+                try {
+                    val followingJson = storage.getString(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWINGS, "")
+                    if (followingJson.isNotBlank()) {
+                        val snapshot = saveJson.decodeFromString(ZombieFollowingSnapshot.serializer(), followingJson)
+                        allResults.addAll(snapshot.items.map { it.user to it.timestamp })
+                        totalChecked = allResults.size
                     }
-                )
-            } catch (_: Exception) { }
+                } catch (_: Exception) { }
 
-            // 计算总页数
-            val totalPages = if (totalCount > 0) (totalCount + pageSize - 1) / pageSize else 1
-            android.util.Log.d("ZombieSearch", "totalCount=$totalCount, totalPages=$totalPages")
-
-            // 恢复断点：从存储中读取上次停止的位置
-            var currentPage = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages)
-            var currentIndex = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
-            
-            // 如果断点无效，从最后一页开始
-            if (currentPage > totalPages || currentPage < 1) {
-                currentPage = totalPages
-                currentIndex = -1
-            }
-            
-            android.util.Log.d("ZombieSearch", "恢复断点: page=$currentPage, index=$currentIndex")
-
-            while (hasMore && isActive) {
-                // 请求当前页
-                val batch = mutableListOf<BiliUser>()
-                getFollowings(uid, currentPage, pageSize).fold(
-                    onSuccess = { list ->
-                        if (list.isEmpty()) hasMore = false
-                        else {
-                            batch += list
-                        }
-                    },
-                    onFailure = { hasMore = false }
-                )
-
-                if (batch.isEmpty()) break
-
-                // 从后往前遍历这一页（最早关注的在页尾）
-                val reversedBatch = batch.reversed()
-                for ((index, user) in reversedBatch.withIndex()) {
-                    if (!isActive) break
-
-                    // 断点续传：跳过已检查的部分
-                    if (currentPage == storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages) 
-                        && index <= currentIndex) continue
-
-                    // 检查UP主
-                    var success = false
-                    var retries = 0
-                    while (!success && isActive) {
-                        val delayMs = if (retries > 0) {
-                            60000L + Random.nextLong(0, 30000)
-                        } else {
-                            getDelayForCount(sessionChecked)
-                        }
-
-                        if (sessionChecked > 0 || currentPage != totalPages) {
-                            delay(delayMs)
-                        }
-
-                        val checkNum = totalChecked + 1
-                        val progressText = "正在检查 ${user.uname} (页${currentPage}, ${checkNum}/${totalCount})..."
-                        _serviceProgress.value = progressText
-                        updateNotification("正在搜索僵尸UP", progressText, checkNum, totalCount.coerceAtLeast(1))
-                        sendProgressBroadcast(1, progressText, checkNum)
-
-                        getUserLastUpdateTime(user.mid).fold(
-                            onSuccess = { timestamp ->
+                // 先通过搜索API快速查找已注销账号
+                val deletedUsers = mutableListOf<BiliUser>()
+                try {
+                    _serviceProgress.value = "正在搜索已注销账号..."
+                    updateNotification("正在搜索僵尸UP", "正在搜索已注销账号...", 0, totalCount.coerceAtLeast(1))
+                    
+                    repo.searchDeletedFollowings(uid).fold(
+                        onSuccess = { list ->
+                            deletedUsers.addAll(list)
+                            // 将已注销账号加入结果（timestamp=0表示已注销）
+                            for (user in list) {
                                 val existing = allResults.indexOfFirst { it.first.mid == user.mid }
-                                if (existing >= 0) {
-                                    allResults[existing] = user to timestamp
-                                } else {
-                                    allResults.add(user to timestamp)
+                                if (existing < 0) {
+                                    allResults.add(user to 0L)
                                 }
-                                success = true
-                                totalChecked++
-                                sessionChecked++
-
-                                if (totalCount > 0) {
-                                    val etaMs = estimateRemainingTime(sessionChecked, totalCount)
-                                    _serviceEta.value = formatEta(etaMs)
-                                }
-                            },
-                            onFailure = {
-                                retries++
                             }
-                        )
-
-                        if (success) {
-                            // 排序并保存结果
+                            // 保存结果
                             val sorted = allResults.sortedBy { it.second }
                             saveFollowingResults(storage, sorted)
                             
-                            // 保存断点：当前页和在倒序中的索引
-                            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, currentPage)
-                            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, index)
-                            android.util.Log.d("ZombieSearch", "保存断点: page=$currentPage, index=$index")
+                            val progressText = "已找到 ${deletedUsers.size} 个已注销账号"
+                            _serviceProgress.value = progressText
+                            updateNotification("正在搜索僵尸UP", progressText, deletedUsers.size, totalCount.coerceAtLeast(1))
+                            android.util.Log.d("ZombieSearch", "搜索完成，找到 ${deletedUsers.size} 个已注销账号")
+                        },
+                        onFailure = {
+                            android.util.Log.e("ZombieSearch", "搜索已注销账号失败: ${it.message}")
+                        }
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.e("ZombieSearch", "搜索已注销账号异常", e)
+                    CrashLogCollector.saveCrashLog(
+                        applicationContext,
+                        e,
+                        mapOf(
+                            "phase" to "search_deleted",
+                            "uid" to uid.toString(),
+                            "totalCount" to totalCount.toString()
+                        )
+                    )
+                }
+
+                // 计算总页数
+                val totalPages = if (totalCount > 0) (totalCount + pageSize - 1) / pageSize else 1
+                android.util.Log.d("ZombieSearch", "totalCount=$totalCount, totalPages=$totalPages")
+
+                // 恢复断点：从存储中读取上次停止的位置
+                var currentPage = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages)
+                var currentIndex = storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
+                
+                // 如果断点无效，从最后一页开始
+                if (currentPage > totalPages || currentPage < 1) {
+                    currentPage = totalPages
+                    currentIndex = -1
+                }
+                
+                android.util.Log.d("ZombieSearch", "恢复断点: page=$currentPage, index=$currentIndex")
+
+                while (hasMore && isActive) {
+                    // 请求当前页
+                    val batch = mutableListOf<BiliUser>()
+                    getFollowings(uid, currentPage, pageSize).fold(
+                        onSuccess = { list ->
+                            if (list.isEmpty()) hasMore = false
+                            else {
+                                batch += list
+                            }
+                        },
+                        onFailure = { hasMore = false }
+                    )
+
+                    if (batch.isEmpty()) break
+
+                    // 从后往前遍历这一页（最早关注的在页尾）
+                    val reversedBatch = batch.reversed()
+                    for ((index, user) in reversedBatch.withIndex()) {
+                        if (!isActive) break
+
+                        // 断点续传：跳过已检查的部分
+                        if (currentPage == storage.getInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages) 
+                            && index <= currentIndex) continue
+
+                        // 检查UP主
+                        var success = false
+                        var retries = 0
+                        while (!success && isActive) {
+                            val delayMs = if (retries > 0) {
+                                60000L + Random.nextLong(0, 30000)
+                            } else {
+                                getDelayForCount(sessionChecked)
+                            }
+
+                            if (sessionChecked > 0 || currentPage != totalPages) {
+                                delay(delayMs)
+                            }
+
+                            val checkNum = totalChecked + 1
+                            val progressText = "正在检查 ${user.uname} (页${currentPage}, ${checkNum}/${totalCount})..."
+                            _serviceProgress.value = progressText
+                            updateNotification("正在搜索僵尸UP", progressText, checkNum, totalCount.coerceAtLeast(1))
+                            sendProgressBroadcast(1, progressText, checkNum)
+
+                            getUserLastUpdateTime(user.mid).fold(
+                                onSuccess = { timestamp ->
+                                    val existing = allResults.indexOfFirst { it.first.mid == user.mid }
+                                    if (existing >= 0) {
+                                        allResults[existing] = user to timestamp
+                                    } else {
+                                        allResults.add(user to timestamp)
+                                    }
+                                    success = true
+                                    totalChecked++
+                                    sessionChecked++
+
+                                    if (totalCount > 0) {
+                                        val etaMs = estimateRemainingTime(sessionChecked, totalCount)
+                                        _serviceEta.value = formatEta(etaMs)
+                                    }
+                                },
+                                onFailure = {
+                                    retries++
+                                }
+                            )
+
+                            if (success) {
+                                // 排序并保存结果
+                                val sorted = allResults.sortedBy { it.second }
+                                saveFollowingResults(storage, sorted)
+                                
+                                // 保存断点：当前页和在倒序中的索引
+                                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, currentPage)
+                                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, index)
+                                android.util.Log.d("ZombieSearch", "保存断点: page=$currentPage, index=$index")
+                            }
                         }
                     }
+                    
+                    // 往前翻页（页码减小）
+                    currentPage--
+                    currentIndex = -1 // 新页从头开始
+                    
+                    // 当翻到第0页时结束
+                    if (currentPage < 1) {
+                        hasMore = false
+                    }
                 }
-                
-                // 往前翻页（页码减小）
-                currentPage--
-                currentIndex = -1 // 新页从头开始
-                
-                // 当翻到第0页时结束
-                if (currentPage < 1) {
-                    hasMore = false
-                }
+
+                // 搜索完成，清除断点
+                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages)
+                storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
+
+                val finalText = "已完成 ${allResults.size} 个UP主"
+                _serviceProgress.value = finalText
+                _serviceEta.value = ""
+                updateNotification("搜索完成", finalText, 100, 100)
+                sendCompleteBroadcast(1, allResults.size)
+
+            } catch (e: Exception) {
+                // 捕获搜索过程中的未预期异常
+                android.util.Log.e("ZombieSearch", "搜索过程崩溃", e)
+                CrashLogCollector.saveCrashLog(
+                    applicationContext,
+                    e,
+                    mapOf(
+                        "phase" to "following_search",
+                        "uid" to uid.toString(),
+                        "scanned" to "unknown"
+                    )
+                )
+                _serviceProgress.value = "搜索异常终止: ${e.message}"
+                updateNotification("搜索异常", "搜索过程出错，请查看日志", 0, 0)
+            } finally {
+                // stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                _serviceRunning.value = false
+                heartbeatJob.cancel()
             }
-
-            // 搜索完成，清除断点
-            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_PAGE, totalPages)
-            storage.putInt(com.yourapp.data.StorageKeys.ZOMBIE_FOLLOWING_LAST_INDEX, -1)
-
-            val finalText = "已完成 ${allResults.size} 个UP主"
-            _serviceProgress.value = finalText
-            _serviceEta.value = ""
-            updateNotification("搜索完成", finalText, 100, 100)
-            sendCompleteBroadcast(1, allResults.size)
-
-            // stopForeground(Service.STOP_FOREGROUND_REMOVE)
-            _serviceRunning.value = false
-            heartbeatJob.cancel()
         }
     }
 
@@ -340,7 +370,7 @@ class ZombieSearchService : Service() {
         _serviceRunning.value = true
 
         val notification = buildNotification("正在搜索僵尸粉...", "准备中", 0, 0)
-        // startForeground(NOTIFICATION_ID, notification)
+        startForeground(NOTIFICATION_ID, notification)
 
         searchJob = serviceScope.launch {
             val storage = AndroidSettingsStorage(applicationContext)
